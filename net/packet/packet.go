@@ -204,6 +204,10 @@ func (q *Parsed) decode4(b []byte) {
 			q.Dst.Port = binary.BigEndian.Uint16(sub[2:4])
 			q.dataofs = q.subofs + udpHeaderLength
 			return
+		case TSMP:
+			// Inter-tailscale messages.
+			parseTSMPPayload(q, sub)
+			return
 		default:
 			q.IPProto = Unknown
 			return
@@ -291,6 +295,10 @@ func (q *Parsed) decode6(b []byte) {
 		q.Src.Port = binary.BigEndian.Uint16(sub[0:2])
 		q.Dst.Port = binary.BigEndian.Uint16(sub[2:4])
 		q.dataofs = q.subofs + udpHeaderLength
+	case TSMP:
+		// Inter-tailscale messages.
+		parseTSMPPayload(q, sub)
+		return
 	default:
 		q.IPProto = Unknown
 		return

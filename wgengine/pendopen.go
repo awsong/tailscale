@@ -35,6 +35,12 @@ type pendingOpenFlow struct {
 func (e *userspaceEngine) trackOpenPreFilterIn(pp *packet.Parsed, t *tstun.TUN) (res filter.Response) {
 	res = filter.Accept // always
 
+	if pp.IPVersion == 4 && pp.IPProto == packet.TSMP {
+		e.logf("pend-drop: got a tsmp packet: %q", pp.Buffer())
+		// TODO(bradfitz): parse it.
+		return filter.DropSilently
+	}
+
 	if pp.IPVersion == 0 ||
 		pp.IPProto != packet.TCP ||
 		pp.TCPFlags&(packet.TCPSyn|packet.TCPRst) == 0 {

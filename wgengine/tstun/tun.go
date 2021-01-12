@@ -218,8 +218,8 @@ func (t *TUN) poll() {
 func (t *TUN) filterOut(p *packet.Parsed) filter.Response {
 
 	if t.PreFilterOut != nil {
-		if t.PreFilterOut(p, t) == filter.Drop {
-			return filter.Drop
+		if res := t.PreFilterOut(p, t); res.IsDrop() {
+			return res
 		}
 	}
 
@@ -234,8 +234,8 @@ func (t *TUN) filterOut(p *packet.Parsed) filter.Response {
 	}
 
 	if t.PostFilterOut != nil {
-		if t.PostFilterOut(p, t) == filter.Drop {
-			return filter.Drop
+		if res := t.PreFilterOut(p, t); res.IsDrop() {
+			return res
 		}
 	}
 
@@ -307,8 +307,8 @@ func (t *TUN) filterIn(buf []byte) filter.Response {
 	p.Decode(buf)
 
 	if t.PreFilterIn != nil {
-		if t.PreFilterIn(p, t) == filter.Drop {
-			return filter.Drop
+		if res := t.PreFilterIn(p, t); res.IsDrop() {
+			return res
 		}
 	}
 
@@ -319,6 +319,26 @@ func (t *TUN) filterIn(buf []byte) filter.Response {
 	}
 
 	if filt.RunIn(p, t.filterFlags) != filter.Accept {
+
+		// Tell them, via proto 99, we're dropping them due to the ACL.
+		// Their host networking stack can translate this into ICMP
+		// or whatnot as required.
+		if p.IPVersion == 4 && p.IPProto == packet.TCP &&
+			p.TCPFlags&packet.TCPSyn != 0 {
+			header := packet.TailscaleRejectedHeader{
+				Src:    p.Src,
+				Dst:    p.Dst,
+				Reason: packet.RejectedDueToACLs,
+				Proto:  p.IPProto,
+			}
+			if filt.ShieldsUp() {
+				header.Reason = packet.RejectedDueToShieldsUp
+			}
+			outp := packet.Generate(header, nil)
+			t.logf("XXX DROPPING PACKET %v; sending %02x", p, outp)
+			t.InjectOutbound(outp)
+		}
+
 		return filter.Drop
 	}
 
@@ -333,8 +353,11 @@ func (t *TUN) filterIn(buf []byte) filter.Response {
 
 func (t *TUN) Write(buf []byte, offset int) (int, error) {
 	if !t.disableFilter {
-		response := t.filterIn(buf[offset:])
-		if response != filter.Accept {
+		res := t.filterIn(buf[offset:])
+		if res == filter.DropSilently {
+			return len(buf), nil
+		}
+		if res != filter.Accept {
 			return 0, ErrFiltered
 		}
 	}
