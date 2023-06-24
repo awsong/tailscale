@@ -104,6 +104,7 @@ func wgTurnOn(tunFd int32) int32 {
 	}
 
 	//	StartDaemon(context.Background(), deviceLogger.Errorf, "Mirage")
+	run(deviceLogger.Errorf)
 	return 0
 }
 

@@ -181,7 +181,7 @@ func main() {
 		envknob.SetNoLogsNoSupport()
 	}
 
-	err := run()
+	err := run(nil)
 
 	// Remove file sharing from Windows shell (noop in non-windows)
 	osshare.SetFileSharingEnabled(false, logger.Discard)
@@ -248,8 +248,8 @@ func ipnServerOpts() (o serverOptions) {
 var logPol *logpolicy.Policy
 var debugMux *http.ServeMux
 
-func run() error {
-	var logf logger.Logf = log.Printf
+func run(logf logger.Logf) error {
+	//var logf logger.Logf = log.Printf
 
 	sys := new(tsd.System)
 
