@@ -72,12 +72,11 @@ func wgSetLogger(context, loggerFn uintptr) {
 }
 
 //export wgTurnOn
-func wgTurnOn(tunFd int32) int32 {
+func wgTurnOn(path *C.char, tunFd int32) int32 {
 	deviceLogger := &device.Logger{
 		Verbosef: CLogger(0).Printf,
 		Errorf:   CLogger(1).Printf,
 	}
-	deviceLogger.Errorf("mmmmmmmmmmmmmmmmmmmmmm2")
 
 	dupTunFd, err := unix.Dup(int(tunFd))
 	if err != nil {
@@ -104,7 +103,12 @@ func wgTurnOn(tunFd int32) int32 {
 	}
 
 	//	StartDaemon(context.Background(), deviceLogger.Errorf, "Mirage")
-	run(deviceLogger.Errorf)
+	go run(C.GoString(path), deviceLogger.Errorf)
+	return 0
+	err = run(C.GoString(path), deviceLogger.Errorf)
+	if err != nil {
+		deviceLogger.Errorf("Unable to start daemon: %v", err)
+	}
 	return 0
 }
 

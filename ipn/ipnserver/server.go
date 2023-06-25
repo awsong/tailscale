@@ -200,7 +200,7 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if strings.HasPrefix(r.URL.Path, "/localapi/") {
 		lah := localapi.NewHandler(lb, s.logf, s.netMon, s.backendLogID)
-		lah.PermitRead, lah.PermitWrite = s.localAPIPermissions(ci)
+		lah.PermitRead, lah.PermitWrite = true, true
 		lah.PermitCert = s.connCanFetchCerts(ci)
 		lah.ServeHTTP(w, r)
 		return

@@ -1,8 +1,6 @@
 // Copyright (c) Tailscale Inc & AUTHORS
 // SPDX-License-Identifier: BSD-3-Clause
 
-//go:build go1.19
-
 package main
 
 import (
@@ -42,7 +40,6 @@ import (
 	"tailscale.com/net/tshttpproxy"
 	"tailscale.com/net/tstun"
 	"tailscale.com/paths"
-	"tailscale.com/safesocket"
 	"tailscale.com/smallzstd"
 	"tailscale.com/syncs"
 	"tailscale.com/tsd"
@@ -59,6 +56,43 @@ import (
 	"tailscale.com/wgengine/netstack"
 	"tailscale.com/wgengine/router"
 )
+
+// defaultTunName returns the default tun device name for the platform.
+func defaultTunName() string {
+	switch runtime.GOOS {
+	case "openbsd":
+		return "tun"
+	case "windows":
+		return "Tailscale"
+	case "darwin":
+		// "utun" is recognized by wireguard-go/tun/tun_darwin.go
+		// as a magic value that uses/creates any free number.
+		return "utun"
+	case "linux":
+		switch distro.Get() {
+		case distro.Synology:
+			// Try TUN, but fall back to userspace networking if needed.
+			// See https://github.com/tailscale/tailscale-synology/issues/35
+			return "tailscale0,userspace-networking"
+		case distro.Gokrazy:
+			// Gokrazy doesn't yet work in tun mode because the whole
+			// Gokrazy thing is no C code, and Tailscale currently
+			// depends on the iptables binary for Linux's
+			// wgengine/router.
+			// But on Gokrazy there's no legacy iptables, so we could use netlink
+			// to program nft-iptables directly. It just isn't done yet;
+			// see https://github.com/tailscale/tailscale/issues/391
+			//
+			// But Gokrazy does have the tun module built-in, so users
+			// can still run --tun=tailscale0 if they wish, if they
+			// arrange for iptables to be present or run in "tailscale
+			// up --netfilter-mode=off" mode, perhaps. Untested.
+			return "userspace-networking"
+		}
+
+	}
+	return "tailscale0"
+}
 
 // defaultPort returns the default UDP port to listen on for disco+wireguard.
 // By default it returns 0, to pick one randomly from the kernel.
@@ -181,7 +215,7 @@ func main() {
 		envknob.SetNoLogsNoSupport()
 	}
 
-	err := run(nil)
+	err := run("", nil)
 
 	// Remove file sharing from Windows shell (noop in non-windows)
 	osshare.SetFileSharingEnabled(false, logger.Discard)
@@ -248,7 +282,17 @@ func ipnServerOpts() (o serverOptions) {
 var logPol *logpolicy.Policy
 var debugMux *http.ServeMux
 
-func run(logf logger.Logf) error {
+func run(path string, logf logger.Logf) error {
+	args.statedir = path
+	logf("mmmmmmmmmm statedir: %q", args.statedir)
+	args.tunname = defaultTunName()
+
+	f, err := os.Create(path + "/output.txt")
+	if err != nil {
+		log.Fatal(err)
+	}
+	os.Stdout = f
+	os.Stderr = f
 	//var logf logger.Logf = log.Printf
 
 	sys := new(tsd.System)
@@ -301,8 +345,11 @@ func run(logf logger.Logf) error {
 }
 
 func startIPNServer(ctx context.Context, logf logger.Logf, logID logid.PublicID, sys *tsd.System) error {
-	ln, err := safesocket.Listen(args.socketpath)
+	//ln, err := safesocket.Listen(args.socketpath)
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	logf("mmmmmmmmm Listening on %v", ln.Addr())
 	if err != nil {
+		logf("safesocket.Listen: %v", err)
 		return fmt.Errorf("safesocket.Listen: %v", err)
 	}
 
@@ -550,10 +597,11 @@ func tryEngine(logf logger.Logf, sys *tsd.System, name string) (onlyNetstack boo
 			return false, err
 		}
 
-		r, err := router.New(logf, dev, sys.NetMon.Get())
-		if err != nil {
-			dev.Close()
-			return false, fmt.Errorf("creating router: %w", err)
+		//r, err := router.New(logf, dev, sys.NetMon.Get())
+		r := &router.CallbackRouter{
+			SetBoth: func(rcfg *router.Config, dcfg *dns.OSConfig) error {
+				return nil
+			},
 		}
 
 		d, err := dns.NewOSConfigurator(logf, devName)
