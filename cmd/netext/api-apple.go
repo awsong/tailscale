@@ -5,12 +5,14 @@
 
 package main
 
+// #include <stdio.h>
 // #include <stdlib.h>
 // #include <sys/types.h>
 // static void callLogger(void *func, void *ctx, int level, const char *msg)
 // {
 // 	((void(*)(void *, int, const char *))func)(ctx, level, msg);
 // }
+// void SwiftIntfSet(const char *localAddrs, const char *routes);
 import "C"
 
 import (
@@ -18,12 +20,15 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
+	"strings"
 	"unsafe"
 
 	"github.com/tailscale/wireguard-go/device"
 	"github.com/tailscale/wireguard-go/tun"
 	"golang.org/x/sys/unix"
+	"tailscale.com/net/dns"
 	"tailscale.com/types/logger"
+	"tailscale.com/wgengine/router"
 )
 
 var loggerFunc unsafe.Pointer
@@ -71,6 +76,8 @@ func wgSetLogger(context, loggerFn uintptr) {
 	loggerFunc = unsafe.Pointer(loggerFn)
 }
 
+var b *backend
+
 //export wgTurnOn
 func wgTurnOn(path *C.char, tunFd int32) int32 {
 	deviceLogger := &device.Logger{
@@ -102,17 +109,44 @@ func wgTurnOn(path *C.char, tunFd int32) int32 {
 		return tunDev, f.Name(), nil
 	}
 
-	//	StartDaemon(context.Background(), deviceLogger.Errorf, "Mirage")
-	go run(C.GoString(path), deviceLogger.Errorf)
-	return 0
-	err = run(C.GoString(path), deviceLogger.Errorf)
+	b, err = newBackend(tunDev, C.GoString(path), deviceLogger.Errorf, setBoth)
 	if err != nil {
-		deviceLogger.Errorf("Unable to start daemon: %v", err)
+		deviceLogger.Errorf("Unable to create backend: %v", err)
+		return -1
 	}
+	//go run(C.GoString(path), deviceLogger.Errorf)
 	return 0
 }
 
 //export wgTurnOff
 func wgTurnOff() {
 
+}
+
+func setBoth(r *router.Config, d *dns.OSConfig) error {
+	localAddrs := r.LocalAddrs
+	routes := r.Routes
+
+	// Convert your Go slices to a form that can be passed to Swift.
+	// This will depend on what your Swift function expects.
+	// For the sake of this example, let's assume your Swift function takes two arrays of strings.
+	var localAddrsStrs []string
+	var routesStrs []string
+
+	for _, addr := range localAddrs {
+		localAddrsStrs = append(localAddrsStrs, addr.String())
+	}
+
+	for _, route := range routes {
+		routesStrs = append(routesStrs, route.String())
+	}
+
+	// Convert the Go string slices to C arrays.
+	// Again, this is a simplification and you'll need to adjust this to match your actual requirements.
+	localAddrsCArray := C.CString(strings.Join(localAddrsStrs, ","))
+	routesCArray := C.CString(strings.Join(routesStrs, ","))
+
+	// Call the Swift function.
+	C.SwiftIntfSet(localAddrsCArray, routesCArray)
+	return nil
 }
