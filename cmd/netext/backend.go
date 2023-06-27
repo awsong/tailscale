@@ -17,6 +17,7 @@ import (
 	"tailscale.com/ipn"
 	"tailscale.com/ipn/ipnlocal"
 	"tailscale.com/ipn/localapi"
+	"tailscale.com/ipn/store"
 	"tailscale.com/logpolicy"
 	"tailscale.com/logtail"
 	"tailscale.com/logtail/filch"
@@ -80,6 +81,12 @@ func newBackend(tunDev tun.Device, dataDir string, logf logger.Logf, settings se
 
 	sys := new(tsd.System)
 
+	store, err := store.New(logf, filepath.Join(dataDir, "tailscaled.state"))
+	if err != nil {
+		return nil, fmt.Errorf("store.New: %w", err)
+	}
+	sys.Set(store)
+
 	//logf := logger.RusagePrefixLog(log.Printf)
 	b := &backend{
 		settings: settings,
@@ -138,12 +145,6 @@ func newBackend(tunDev tun.Device, dataDir string, logf logger.Logf, settings se
 func (b *backend) Start(notify func(n ipn.Notify)) error {
 	b.backend.SetNotifyCallback(notify)
 	return b.backend.Start(ipn.Options{})
-}
-
-func (b *backend) LinkChange() {
-	if b.engine != nil {
-		b.engine.LinkChange(false)
-	}
 }
 
 func (b *backend) setCfg(rcfg *router.Config, dcfg *dns.OSConfig) error {
@@ -254,7 +255,7 @@ func (b *backend) getDNSBaseConfig() (ret dns.OSConfig, _ error) {
 }
 
 func (b *backend) RunLocalAPIServer() {
-	http.HandleFunc("/localapi", func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc("/localapi/", func(w http.ResponseWriter, r *http.Request) {
 		// Assuming lah is your handler
 		b.lah.ServeHTTP(w, r)
 	})

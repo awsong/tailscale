@@ -26,7 +26,9 @@ import (
 	"github.com/tailscale/wireguard-go/device"
 	"github.com/tailscale/wireguard-go/tun"
 	"golang.org/x/sys/unix"
+	"tailscale.com/ipn"
 	"tailscale.com/net/dns"
+	"tailscale.com/tailcfg"
 	"tailscale.com/types/logger"
 	"tailscale.com/wgengine/router"
 )
@@ -79,11 +81,23 @@ func wgSetLogger(context, loggerFn uintptr) {
 var b *backend
 
 //export wgTurnOn
-func wgTurnOn(path *C.char, tunFd int32) int32 {
+func wgTurnOn() int32 {
+	return 0
+}
+
+//export miraStartEngine
+func miraStartEngine(path *C.char, tunFd int32) int32 {
 	deviceLogger := &device.Logger{
 		Verbosef: CLogger(0).Printf,
 		Errorf:   CLogger(1).Printf,
 	}
+
+	errf, err := os.Create(C.GoString(path) + "/output.txt")
+	if err != nil {
+		deviceLogger.Errorf("Error create output file: %v", err)
+	}
+	os.Stdout = errf
+	os.Stderr = errf
 
 	dupTunFd, err := unix.Dup(int(tunFd))
 	if err != nil {
@@ -114,7 +128,8 @@ func wgTurnOn(path *C.char, tunFd int32) int32 {
 		deviceLogger.Errorf("Unable to create backend: %v", err)
 		return -1
 	}
-	//go run(C.GoString(path), deviceLogger.Errorf)
+	b.RunLocalAPIServer()
+	go runBackend()
 	return 0
 }
 
@@ -149,4 +164,71 @@ func setBoth(r *router.Config, d *dns.OSConfig) error {
 	// Call the Swift function.
 	C.SwiftIntfSet(localAddrsCArray, routesCArray)
 	return nil
+}
+
+type UICommand int32
+
+const (
+	OAuth2Event UICommand = iota //0
+	ToggleEvent
+	BeExitNodeEvent
+	ExitAllowLANEvent
+	UseTailscaleDNSEvent
+	UseTailscaleSubnetsEvent
+	AllowIncomingTransactionsEvent
+	WebAuthEvent
+	SetLoginServerEvent
+	LogoutEvent
+	ConnectEvent
+	RouteAllEvent
+)
+
+//export RunUICommand
+func RunUICommand(e int32, arg string) {
+	switch (UICommand)(e) {
+	case ToggleEvent:
+		state.Prefs.WantRunning = !state.Prefs.WantRunning
+		go b.backend.SetPrefs(state.Prefs)
+	case BeExitNodeEvent:
+		state.Prefs.SetAdvertiseExitNode(true)
+		go b.backend.SetPrefs(state.Prefs)
+	case ExitAllowLANEvent:
+		state.Prefs.ExitNodeAllowLANAccess = true
+		go b.backend.SetPrefs(state.Prefs)
+	case UseTailscaleDNSEvent:
+		state.Prefs.CorpDNS = true
+		go b.backend.SetPrefs(state.Prefs)
+	case UseTailscaleSubnetsEvent:
+		state.Prefs.RouteAll = true
+		go b.backend.SetPrefs(state.Prefs)
+	case AllowIncomingTransactionsEvent:
+		state.Prefs.ShieldsUp = true
+		go b.backend.SetPrefs(state.Prefs)
+	case WebAuthEvent:
+		if !signingIn {
+			go b.backend.StartLoginInteractive()
+			signingIn = true
+		}
+	case SetLoginServerEvent:
+		state.Prefs.ControlURL = arg
+		b.backend.SetPrefs(state.Prefs)
+		// Need to restart to force the login URL to be regenerated
+		// with the new control URL. Start from a goroutine to avoid
+		// deadlock.
+		go func() {
+			err := b.backend.Start(ipn.Options{})
+			if err != nil {
+				//TOTO: log error
+			}
+		}()
+	case LogoutEvent:
+		go b.backend.Logout()
+	case ConnectEvent:
+		state.Prefs.WantRunning = true //TODO: convert from arg
+		go b.backend.SetPrefs(state.Prefs)
+	case RouteAllEvent:
+		state.Prefs.ExitNodeID = tailcfg.StableNodeID(arg)
+		go b.backend.SetPrefs(state.Prefs)
+		state.updateExitNodes()
+	}
 }
