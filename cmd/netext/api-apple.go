@@ -12,14 +12,16 @@ package main
 // {
 // 	((void(*)(void *, int, const char *))func)(ctx, level, msg);
 // }
-// void SwiftIntfSet(const char *localAddrs, const char *routes);
+// void SwiftIntfSet(const char *, const char *, const char*, const char*);
 import "C"
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"os/signal"
 	"runtime"
+	"strconv"
 	"strings"
 	"unsafe"
 
@@ -29,7 +31,6 @@ import (
 	"tailscale.com/ipn"
 	"tailscale.com/net/dns"
 	"tailscale.com/tailcfg"
-	"tailscale.com/types/logger"
 	"tailscale.com/wgengine/router"
 )
 
@@ -119,10 +120,6 @@ func miraStartEngine(path *C.char, tunFd int32) int32 {
 		return -1
 	}
 
-	tstunNew = func(logf logger.Logf, tunName string) (tun.Device, string, error) {
-		return tunDev, f.Name(), nil
-	}
-
 	b, err = newBackend(tunDev, C.GoString(path), deviceLogger.Errorf, setBoth)
 	if err != nil {
 		deviceLogger.Errorf("Unable to create backend: %v", err)
@@ -145,24 +142,46 @@ func setBoth(r *router.Config, d *dns.OSConfig) error {
 	// Convert your Go slices to a form that can be passed to Swift.
 	// This will depend on what your Swift function expects.
 	// For the sake of this example, let's assume your Swift function takes two arrays of strings.
-	var localAddrsStrs []string
-	var routesStrs []string
+	var v4AddrsStrs []string
+	var v4RoutesStrs []string
+	var v6AddrsStrs []string
+	var v6RoutesStrs []string
 
 	for _, addr := range localAddrs {
-		localAddrsStrs = append(localAddrsStrs, addr.String())
+		ipaddr, ipNet, _ := net.ParseCIDR(addr.String())
+		if addr.Addr().Is4() {
+			v4AddrsStrs = append(v4AddrsStrs, ipaddr.String())
+			v4AddrsStrs = append(v4AddrsStrs, net.IP(ipNet.Mask).String())
+		} else {
+			v6AddrsStrs = append(v6AddrsStrs, ipaddr.String())
+			v6AddrsStrs = append(v6AddrsStrs, strconv.Itoa(addr.Bits()))
+		}
 	}
 
 	for _, route := range routes {
-		routesStrs = append(routesStrs, route.String())
+		ipaddr, ipNet, _ := net.ParseCIDR(route.String())
+		if route.Addr().Is4() {
+			v4RoutesStrs = append(v4RoutesStrs, ipaddr.String())
+			v4RoutesStrs = append(v4RoutesStrs, net.IP(ipNet.Mask).String())
+		} else {
+			v6RoutesStrs = append(v6RoutesStrs, ipaddr.String())
+			v6RoutesStrs = append(v6RoutesStrs, strconv.Itoa(route.Bits()))
+		}
 	}
 
 	// Convert the Go string slices to C arrays.
 	// Again, this is a simplification and you'll need to adjust this to match your actual requirements.
-	localAddrsCArray := C.CString(strings.Join(localAddrsStrs, ","))
-	routesCArray := C.CString(strings.Join(routesStrs, ","))
+	v4AddrsCArray := C.CString(strings.Join(v4AddrsStrs, ","))
+	v4RoutesCArray := C.CString(strings.Join(v4RoutesStrs, ","))
+	v6AddrsCArray := C.CString(strings.Join(v6AddrsStrs, ","))
+	v6RoutesCArray := C.CString(strings.Join(v6RoutesStrs, ","))
 
 	// Call the Swift function.
-	C.SwiftIntfSet(localAddrsCArray, routesCArray)
+	fmt.Println("v4 Address", C.GoString(v4AddrsCArray))
+	fmt.Println("v4 Route", C.GoString(v4RoutesCArray))
+	fmt.Println("v6 Address", C.GoString(v6AddrsCArray))
+	fmt.Println("v6 Route", C.GoString(v6RoutesCArray))
+	C.SwiftIntfSet(v4AddrsCArray, v4RoutesCArray, v6AddrsCArray, v6RoutesCArray)
 	return nil
 }
 
