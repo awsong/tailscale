@@ -39,7 +39,8 @@ type BackendState struct {
 	// ExitState describes the state of our exit node.
 	ExitStatus ExitStatus
 	// Exit is our current exit node, if any.
-	Exit Peer
+	Exit        Peer
+	BrowseToURL string
 }
 
 func (s *BackendState) updateExitNodes() {
@@ -127,6 +128,7 @@ func runBackend() error {
 			if s := n.State; s != nil {
 				oldState := state.State
 				state.State = *s
+				UpdateNEIPNState(state.State)
 
 				// Stop VPN if we logged out.
 				if oldState > ipn.Stopped && state.State <= ipn.Stopped {
@@ -135,6 +137,8 @@ func runBackend() error {
 			}
 			if u := n.BrowseToURL; u != nil {
 				signingIn = false
+				state.BrowseToURL = *u
+				UpdateBrowserURL(state.BrowseToURL)
 				//a.setURL(*u)
 				// TODO, call swift to open url
 			}

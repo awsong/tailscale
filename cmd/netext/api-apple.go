@@ -13,6 +13,8 @@ package main
 // 	((void(*)(void *, int, const char *))func)(ctx, level, msg);
 // }
 // void SwiftIntfSet(const char *, const char *, const char*, const char*);
+// void UpdateIPNState(int32_t);
+// void UpdateBrowserURL(const char *);
 import "C"
 
 import (
@@ -88,6 +90,9 @@ func wgTurnOn() int32 {
 
 //export miraStartEngine
 func miraStartEngine(path *C.char, tunFd int32) int32 {
+	if b != nil {
+		return 0
+	}
 	deviceLogger := &device.Logger{
 		Verbosef: CLogger(0).Printf,
 		Errorf:   CLogger(1).Printf,
@@ -200,10 +205,16 @@ const (
 	LogoutEvent
 	ConnectEvent
 	RouteAllEvent
+	GetIPNState
 )
 
 //export RunUICommand
-func RunUICommand(e int32, arg string) {
+func RunUICommand(e int32, input *C.char, addrOut *C.char, addrLen C.size_t) int32 {
+	arg := C.GoString(input)
+	fmt.Println("RunUICommand", e, arg)
+
+	// Start out NUL-termianted to cover error conditions.
+	*addrOut = '\x00'
 	switch (UICommand)(e) {
 	case ToggleEvent:
 		state.Prefs.WantRunning = !state.Prefs.WantRunning
@@ -224,6 +235,9 @@ func RunUICommand(e int32, arg string) {
 		state.Prefs.ShieldsUp = true
 		go b.backend.SetPrefs(state.Prefs)
 	case WebAuthEvent:
+		out := unsafe.Slice((*byte)(unsafe.Pointer(addrOut)), addrLen)
+		n := copy(out, "output")
+		out[n] = '\x00'
 		if !signingIn {
 			go b.backend.StartLoginInteractive()
 			signingIn = true
@@ -249,5 +263,16 @@ func RunUICommand(e int32, arg string) {
 		state.Prefs.ExitNodeID = tailcfg.StableNodeID(arg)
 		go b.backend.SetPrefs(state.Prefs)
 		state.updateExitNodes()
+	case GetIPNState:
+		return int32(state.State)
 	}
+	return 0
+}
+
+func UpdateNEIPNState(state ipn.State) {
+	C.UpdateIPNState(C.int32_t(state))
+}
+
+func UpdateBrowserURL(url string) {
+	C.UpdateBrowserURL(C.CString(url))
 }
