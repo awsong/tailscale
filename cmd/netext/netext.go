@@ -5,6 +5,7 @@ package main
 
 import (
 	"net/netip"
+	"os"
 	"sort"
 
 	"tailscale.com/ipn"
@@ -121,7 +122,8 @@ func runBackend() error {
 				state.Prefs = p.AsStruct()
 				state.updateExitNodes()
 				if first {
-					state.Prefs.Hostname = "TODO" //TODO: get host name by NE API
+					hostname, _ := os.Hostname() //TODO: get host name by NE API
+					state.Prefs.Hostname = hostname
 					go b.backend.SetPrefs(state.Prefs)
 				}
 			}
