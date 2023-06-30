@@ -4,6 +4,8 @@
 package main
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/netip"
 	"os"
 	"sort"
@@ -141,12 +143,39 @@ func runBackend() error {
 				signingIn = false
 				state.BrowseToURL = *u
 				UpdateBrowserURL(state.BrowseToURL)
-				//a.setURL(*u)
-				// TODO, call swift to open url
 			}
 			if m := n.NetMap; m != nil {
+				type Node struct {
+					NodeName string
+					IP       string
+				}
+				type NetMap struct {
+					UserName  string
+					NodeName  string
+					IP        string
+					Peers     []*Node
+					ExitNodes []Peer
+				}
 				state.NetworkMap = m
 				state.updateExitNodes()
+				netMap := NetMap{
+					UserName:  m.UserProfiles[m.User].DisplayName,
+					NodeName:  m.SelfNode.Hostinfo.Hostname(),
+					IP:        m.Addresses[0].Addr().String(),
+					Peers:     make([]*Node, 0, len(m.Peers)),
+					ExitNodes: state.Exits,
+				}
+				for _, peer := range state.NetworkMap.Peers {
+					netMap.Peers = append(netMap.Peers, &Node{
+						NodeName: peer.Hostinfo.Hostname(),
+						IP:       peer.Addresses[0].Addr().String(),
+					})
+				}
+				jstring, _ := json.Marshal(netMap)
+				fmt.Println("---------------------------")
+				fmt.Println(string(jstring))
+				fmt.Println("---------------------------")
+				UpdateNetMap(string(jstring))
 			}
 		}
 	}
