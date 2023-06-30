@@ -20,7 +20,6 @@ import (
 	"tailscale.com/ipn/store"
 	"tailscale.com/logpolicy"
 	"tailscale.com/logtail"
-	"tailscale.com/logtail/filch"
 	"tailscale.com/net/dns"
 	"tailscale.com/net/netmon"
 	"tailscale.com/net/tsdial"
@@ -181,15 +180,17 @@ func (b *backend) SetupLogs(logDir string, logID logid.PrivateID) {
 	}
 	logcfg.FlushDelayFn = func() time.Duration { return 2 * time.Minute }
 
+	/* this causes a LOT of RAW-STDERR in filch'ed files ipn.log..log1.txt
 	filchOpts := filch.Options{
 		ReplaceStderr: true,
 	}
 
-	var filchErr error
-	if logDir != "" {
-		logPath := filepath.Join(logDir, "ipn.log.")
-		logcfg.Buffer, filchErr = filch.New(logPath, filchOpts)
-	}
+		var filchErr error
+		if logDir != "" {
+			logPath := filepath.Join(logDir, "ipn.log.")
+			logcfg.Buffer, filchErr = filch.New(logPath, filchOpts)
+		}
+	*/
 
 	b.logger = logtail.NewLogger(logcfg, logf)
 
@@ -201,9 +202,11 @@ func (b *backend) SetupLogs(logDir string, logID logid.PrivateID) {
 	if logDir == "" {
 		log.Printf("SetupLogs: no logDir, storing logs in memory")
 	}
-	if filchErr != nil {
-		log.Printf("SetupLogs: filch setup failed: %v", filchErr)
-	}
+	/*
+		if filchErr != nil {
+			log.Printf("SetupLogs: filch setup failed: %v", filchErr)
+		}
+	*/
 }
 
 func (b *backend) getPlatformDNSConfig() string {
