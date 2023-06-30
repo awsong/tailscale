@@ -176,16 +176,11 @@ func setBoth(r *router.Config, d *dns.OSConfig) error {
 
 	// Convert the Go string slices to C arrays.
 	// Again, this is a simplification and you'll need to adjust this to match your actual requirements.
-	v4AddrsCArray := C.CString(strings.Join(v4AddrsStrs, ","))
-	v4RoutesCArray := C.CString(strings.Join(v4RoutesStrs, ","))
-	v6AddrsCArray := C.CString(strings.Join(v6AddrsStrs, ","))
-	v6RoutesCArray := C.CString(strings.Join(v6RoutesStrs, ","))
+	v4AddrsCArray := cstring(strings.Join(v4AddrsStrs, ","))
+	v4RoutesCArray := cstring(strings.Join(v4RoutesStrs, ","))
+	v6AddrsCArray := cstring(strings.Join(v6AddrsStrs, ","))
+	v6RoutesCArray := cstring(strings.Join(v6RoutesStrs, ","))
 
-	// Call the Swift function.
-	fmt.Println("v4 Address", C.GoString(v4AddrsCArray))
-	fmt.Println("v4 Route", C.GoString(v4RoutesCArray))
-	fmt.Println("v6 Address", C.GoString(v6AddrsCArray))
-	fmt.Println("v6 Route", C.GoString(v6RoutesCArray))
 	C.SwiftIntfSet(v4AddrsCArray, v4RoutesCArray, v6AddrsCArray, v6RoutesCArray)
 	return nil
 }
@@ -274,5 +269,5 @@ func UpdateNEIPNState(state ipn.State) {
 }
 
 func UpdateBrowserURL(url string) {
-	C.UpdateBrowserURL(C.CString(url))
+	C.UpdateBrowserURL(cstring(url))
 }
