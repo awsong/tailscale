@@ -15,7 +15,7 @@ package main
 // void SwiftIntfSet(const char *, const char *, const char*, const char*);
 // void UpdateIPNState(int32_t);
 // void UpdateBrowserURL(const char *);
-// void UpdateNetMap(const char *);
+// void UpdateEngineState(const char *);
 import "C"
 
 import (
@@ -274,5 +274,5 @@ func UpdateBrowserURL(url string) {
 }
 
 func UpdateNetMap(netMap string) {
-	C.UpdateNetMap(cstring(netMap))
+	C.UpdateEngineState(cstring(netMap))
 }

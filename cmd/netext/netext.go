@@ -112,6 +112,20 @@ func runBackend() error {
 			notifications <- n
 		})
 	}()
+	type Node struct {
+		NodeName string
+		IP       string
+	}
+	type EngineState struct {
+		UserName  string
+		NodeName  string
+		IP        string
+		Peers     []*Node
+		ExitNodes []Peer
+		ShieldsUp bool
+		CorpDNS   bool
+		RouteAll  bool
+	}
 	for {
 		select {
 		case err := <-startErr:
@@ -145,25 +159,17 @@ func runBackend() error {
 				UpdateBrowserURL(state.BrowseToURL)
 			}
 			if m := n.NetMap; m != nil {
-				type Node struct {
-					NodeName string
-					IP       string
-				}
-				type NetMap struct {
-					UserName  string
-					NodeName  string
-					IP        string
-					Peers     []*Node
-					ExitNodes []Peer
-				}
 				state.NetworkMap = m
 				state.updateExitNodes()
-				netMap := NetMap{
+				netMap := EngineState{
 					UserName:  m.UserProfiles[m.User].DisplayName,
 					NodeName:  m.SelfNode.Hostinfo.Hostname(),
 					IP:        m.Addresses[0].Addr().String(),
 					Peers:     make([]*Node, 0, len(m.Peers)),
 					ExitNodes: state.Exits,
+					ShieldsUp: state.Prefs.ShieldsUp,
+					CorpDNS:   state.Prefs.CorpDNS,
+					RouteAll:  state.Prefs.RouteAll,
 				}
 				for _, peer := range state.NetworkMap.Peers {
 					netMap.Peers = append(netMap.Peers, &Node{
