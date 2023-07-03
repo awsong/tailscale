@@ -201,7 +201,7 @@ const (
 	LogoutEvent
 	ConnectEvent
 	RouteAllEvent
-	GetIPNState
+	RefreshEngineState
 )
 
 //export RunUICommand
@@ -259,8 +259,8 @@ func RunUICommand(e int32, input *C.char, addrOut *C.char, addrLen C.size_t) int
 		state.Prefs.ExitNodeID = tailcfg.StableNodeID(arg)
 		go b.backend.SetPrefs(state.Prefs)
 		state.updateExitNodes()
-	case GetIPNState:
-		return int32(state.State)
+	case RefreshEngineState:
+		UpdateEngineState(GetEngineState())
 	}
 	return 0
 }
@@ -273,6 +273,6 @@ func UpdateBrowserURL(url string) {
 	C.UpdateBrowserURL(cstring(url))
 }
 
-func UpdateNetMap(netMap string) {
-	C.UpdateEngineState(cstring(netMap))
+func UpdateEngineState(engineState string) {
+	C.UpdateEngineState(cstring(engineState))
 }
