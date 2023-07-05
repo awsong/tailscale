@@ -126,6 +126,7 @@ func runBackend() error {
 				if first {
 					hostname, _ := os.Hostname() //TODO: get host name by NE API
 					state.Prefs.Hostname = hostname
+					state.Prefs.RouteAll = true
 					go b.backend.SetPrefs(state.Prefs)
 				}
 			}
