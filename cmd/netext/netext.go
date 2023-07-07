@@ -156,6 +156,7 @@ func runBackend() error {
 
 func GetEngineState() string {
 	type Node struct {
+		UserName string
 		NodeName string
 		IP       string
 	}
@@ -182,6 +183,7 @@ func GetEngineState() string {
 	}
 	for _, peer := range state.NetworkMap.Peers {
 		netMap.Peers = append(netMap.Peers, &Node{
+			UserName: m.UserProfiles[peer.User].DisplayName,
 			NodeName: peer.Hostinfo.Hostname(),
 			IP:       peer.Addresses[0].Addr().String(),
 		})
