@@ -13,6 +13,7 @@ import (
 	"tailscale.com/ipn"
 	"tailscale.com/tailcfg"
 	"tailscale.com/types/netmap"
+	"tailscale.com/util/dnsname"
 )
 
 type ExitStatus uint8
@@ -125,7 +126,7 @@ func runBackend() error {
 				state.updateExitNodes()
 				if first {
 					hostname, _ := os.Hostname() //TODO: get host name by NE API
-					state.Prefs.Hostname = hostname
+					state.Prefs.Hostname = dnsname.FirstLabel(hostname)
 					state.Prefs.RouteAll = true
 					go b.backend.SetPrefs(state.Prefs)
 				}
