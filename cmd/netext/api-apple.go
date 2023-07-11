@@ -275,10 +275,15 @@ func RunUICommand(e int32, input *C.char, addrOut *C.char, addrLen C.size_t) int
 		state.Prefs.WantRunning = true //TODO: convert from arg
 		go b.backend.SetPrefs(state.Prefs)
 	case RouteAllEvent:
-		state.Prefs.ExitNodeID = tailcfg.StableNodeID(arg)
+		if arg == "" {
+			state.Prefs.ClearExitNode()
+		} else {
+			state.Prefs.ExitNodeID = tailcfg.StableNodeID(arg)
+		}
 		go b.backend.SetPrefs(state.Prefs)
 		state.updateExitNodes()
 	case RefreshEngineState:
+		state.updateExitNodes()
 		UpdateEngineState(GetEngineState())
 	}
 	return 0
