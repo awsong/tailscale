@@ -108,6 +108,7 @@ func runBackend() error {
 	startErr := make(chan error)
 	// Start from a goroutine to avoid deadlock when Start
 	// calls the callback.
+	var oldState string
 	go func() {
 		startErr <- b.Start(func(n ipn.Notify) {
 			notifications <- n
@@ -149,7 +150,17 @@ func runBackend() error {
 			if m := n.NetMap; m != nil {
 				state.NetworkMap = m
 				state.updateExitNodes()
-				UpdateEngineState(GetEngineState())
+				newState := GetEngineState()
+				if newState != oldState {
+					oldState = newState
+
+					UpdateEngineState(newState)
+					fmt.Println("---------------------------")
+					fmt.Println(newState)
+					fmt.Println("---------------------------")
+				} else {
+					fmt.Println("no change")
+				}
 			}
 		}
 	}
@@ -165,8 +176,8 @@ func GetEngineState() string {
 		UserName   string
 		NodeName   string
 		IP         string
-		Peers      []*Node
-		ExitNodes  []Peer
+		Peers      []*Node `json:"Peers,omitempty"`
+		ExitNodes  []Peer  `json:"ExitNodes,omitempty"`
 		ExitStatus ExitStatus
 		Exit       Peer
 		ShieldsUp  bool
@@ -174,9 +185,12 @@ func GetEngineState() string {
 		RouteAll   bool
 	}
 	m := state.NetworkMap
-	netMap := EngineState{
+	if m == nil {
+		return ""
+	}
+	engineState := EngineState{
 		UserName:   m.UserProfiles[m.User].DisplayName,
-		NodeName:   m.SelfNode.Hostinfo.Hostname(),
+		NodeName:   m.SelfNode.ComputedName,
 		IP:         m.Addresses[0].Addr().String(),
 		Peers:      make([]*Node, 0, len(m.Peers)),
 		ExitNodes:  state.Exits,
@@ -187,16 +201,13 @@ func GetEngineState() string {
 		RouteAll:   state.Prefs.RouteAll,
 	}
 	for _, peer := range state.NetworkMap.Peers {
-		netMap.Peers = append(netMap.Peers, &Node{
+		engineState.Peers = append(engineState.Peers, &Node{
 			UserName: m.UserProfiles[peer.User].DisplayName,
 			NodeName: peer.Hostinfo.Hostname(),
 			IP:       peer.Addresses[0].Addr().String(),
 		})
 	}
-	jstring, _ := json.Marshal(netMap)
-	fmt.Println("---------------------------")
-	fmt.Println(string(jstring))
-	fmt.Println("---------------------------")
+	jstring, _ := json.Marshal(engineState)
 	return string(jstring)
 }
 
