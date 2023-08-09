@@ -5,7 +5,6 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/netip"
 	"os"
 	"sort"
@@ -131,6 +130,11 @@ func runBackend() error {
 					state.Prefs.RouteAll = true
 					go b.backend.SetPrefs(state.Prefs)
 				}
+				newState := GetEngineState()
+				if newState != oldState {
+					oldState = newState
+					UpdateEngineState(newState)
+				}
 			}
 			if s := n.State; s != nil {
 				oldState := state.State
@@ -153,13 +157,7 @@ func runBackend() error {
 				newState := GetEngineState()
 				if newState != oldState {
 					oldState = newState
-
 					UpdateEngineState(newState)
-					fmt.Println("---------------------------")
-					fmt.Println(newState)
-					fmt.Println("---------------------------")
-				} else {
-					fmt.Println("no change")
 				}
 			}
 		}
