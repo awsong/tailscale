@@ -169,6 +169,7 @@ func GetEngineState() string {
 		UserName string
 		NodeName string
 		IP       string
+		IsOnline *bool `json:",omitempty"`
 	}
 	type EngineState struct {
 		UserName   string
@@ -203,6 +204,7 @@ func GetEngineState() string {
 			UserName: m.UserProfiles[peer.User].DisplayName,
 			NodeName: peer.Hostinfo.Hostname(),
 			IP:       peer.Addresses[0].Addr().String(),
+			IsOnline: peer.Online,
 		})
 	}
 	jstring, _ := json.Marshal(engineState)
