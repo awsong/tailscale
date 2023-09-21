@@ -31,7 +31,7 @@ import (
 // ("coordination server") for use when no explicit one is configured.
 // The default control plane is the hosted version run by Tailscale.com.
 // const DefaultControlURL = "https://controlplane.tailscale.com"
-const DefaultControlURL = "https://sdp.matesafe.cn"
+const DefaultControlURL = "https://sdp.full-mesh.cn"
 
 var (
 	// ErrExitNodeIDAlreadySet is returned from (*Prefs).SetExitNodeIP when the

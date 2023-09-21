@@ -33,14 +33,14 @@ import (
 // DefaultHost is the default host name to upload logs to when
 // Config.BaseURL isn't provided.
 // const DefaultHost = "log.tailscale.io"
-const DefaultHost = "log.matesafe.cn"
+const DefaultHost = "log.full-mesh.cn"
 
 const defaultFlushDelay = 2 * time.Second
 
 const (
 	// CollectionNode is the name of a logtail Config.Collection
 	// for tailscaled (or equivalent: IPNExtension, Android app).
-	CollectionNode = "tailnode.log.matesafe.cn"
+	CollectionNode = "tailnode.log.full-mesh.cn"
 )
 
 type Encoder interface {

@@ -107,7 +107,7 @@ func (nl *Logger) Startup(nodeID tailcfg.StableNodeID, nodeLogID, domainLogID lo
 		httpc = testClient
 	}
 	nl.logger = logtail.NewLogger(logtail.Config{
-		Collection:    "tailtraffic.log.matesafe.cn",
+		Collection:    "tailtraffic.log.full-mesh.cn",
 		PrivateID:     nodeLogID,
 		CopyPrivateID: domainLogID,
 		Stderr:        io.Discard,
