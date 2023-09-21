@@ -82,6 +82,7 @@ func runMonitor(ctx context.Context, loop bool) error {
 	}
 	defer mon.Close()
 
+	/* TODO: re-enable this once we know what we are doing here.
 	mon.RegisterChangeCallback(func(changed bool, st *interfaces.State) {
 		if !changed {
 			log.Printf("Network monitor fired; no change")
@@ -90,6 +91,7 @@ func runMonitor(ctx context.Context, loop bool) error {
 		log.Printf("Network monitor fired. New state:")
 		dump(st)
 	})
+	*/
 	if loop {
 		log.Printf("Starting link change monitor; initial state:")
 	}

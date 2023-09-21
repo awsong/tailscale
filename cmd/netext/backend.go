@@ -112,7 +112,7 @@ func newBackend(tunDev tun.Device, dataDir string, logf logger.Logf, settings se
 	}
 	sys.Set(engine)
 	b.logIDPublic = logID.Public().String()
-	ns, err := netstack.Create(logf, sys.Tun.Get(), engine, sys.MagicSock.Get(), dialer, sys.DNSManager.Get())
+	ns, err := netstack.Create(logf, sys.Tun.Get(), engine, sys.MagicSock.Get(), dialer, sys.DNSManager.Get(), sys.ProxyMapper())
 	if err != nil {
 		return nil, fmt.Errorf("netstack.Create: %w", err)
 	}
@@ -164,7 +164,7 @@ func (b *backend) SetupLogs(logDir string, logID logid.PrivateID) {
 	if err != nil {
 		log.Printf("netmon.New: %w", err)
 	}
-	transport := logpolicy.NewLogtailTransport(logtail.DefaultHost, netMon)
+	transport := logpolicy.NewLogtailTransport(logtail.DefaultHost, netMon, logf)
 
 	logcfg := logtail.Config{
 		Collection:          logtail.CollectionNode,

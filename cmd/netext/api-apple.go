@@ -19,6 +19,7 @@ package main
 import "C"
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -270,7 +271,7 @@ func RunUICommand(e int32, input *C.char, addrOut *C.char, addrLen C.size_t) int
 			}
 		}()
 	case LogoutEvent:
-		go b.backend.Logout()
+		go b.backend.Logout(context.Background())
 	case ConnectEvent:
 		state.Prefs.WantRunning = true //TODO: convert from arg
 		go b.backend.SetPrefs(state.Prefs)

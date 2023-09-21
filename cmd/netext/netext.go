@@ -57,24 +57,25 @@ func (s *BackendState) updateExitNodes() {
 	}
 	hasMyExit := exitID == ""
 	s.Exits = nil
-	var peers []*tailcfg.Node
+	var peers []tailcfg.NodeView
 	if s.NetworkMap != nil {
 		peers = s.NetworkMap.Peers
 	}
 	for _, p := range peers {
 		canRoute := false
-		for _, r := range p.AllowedIPs {
+		for i := range p.AllowedIPs().LenIter() {
+			r := p.AllowedIPs().At(i)
 			if r == netip.MustParsePrefix("0.0.0.0/0") || r == netip.MustParsePrefix("::/0") {
 				canRoute = true
 				break
 			}
 		}
-		myExit := p.StableID == exitID
+		myExit := p.StableID() == exitID
 		hasMyExit = hasMyExit || myExit
 		exit := Peer{
 			Label:  p.DisplayName(true),
 			Online: canRoute,
-			ID:     p.StableID,
+			ID:     p.StableID(),
 		}
 		if myExit {
 			s.Exit = exit
@@ -188,9 +189,9 @@ func GetEngineState() string {
 		return ""
 	}
 	engineState := EngineState{
-		UserName:   m.UserProfiles[m.User].DisplayName,
-		NodeName:   m.SelfNode.ComputedName,
-		IP:         m.Addresses[0].Addr().String(),
+		UserName:   m.UserProfiles[m.User()].DisplayName,
+		NodeName:   m.SelfNode.ComputedName(),
+		IP:         m.SelfNode.Addresses().At(0).Addr().String(),
 		Peers:      make([]*Node, 0, len(m.Peers)),
 		ExitNodes:  state.Exits,
 		ExitStatus: state.ExitStatus,
@@ -201,10 +202,10 @@ func GetEngineState() string {
 	}
 	for _, peer := range state.NetworkMap.Peers {
 		engineState.Peers = append(engineState.Peers, &Node{
-			UserName: m.UserProfiles[peer.User].DisplayName,
-			NodeName: peer.Hostinfo.Hostname(),
-			IP:       peer.Addresses[0].Addr().String(),
-			IsOnline: peer.Online,
+			UserName: m.UserProfiles[peer.User()].DisplayName,
+			NodeName: peer.Hostinfo().Hostname(),
+			IP:       peer.Addresses().At(0).Addr().String(),
+			IsOnline: peer.Online(),
 		})
 	}
 	jstring, _ := json.Marshal(engineState)
