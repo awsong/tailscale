@@ -16,7 +16,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"math/big"
 	"net"
 	"net/http"
@@ -30,6 +29,7 @@ import (
 	"time"
 
 	"golang.org/x/net/proxy"
+	"tailscale.com/cmd/testwrapper/flakytest"
 	"tailscale.com/ipn"
 	"tailscale.com/ipn/store/mem"
 	"tailscale.com/net/netns"
@@ -282,6 +282,7 @@ func TestConn(t *testing.T) {
 }
 
 func TestLoopbackLocalAPI(t *testing.T) {
+	flakytest.Mark(t, "https://github.com/tailscale/tailscale/issues/8557")
 	tstest.ResourceCheck(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -356,6 +357,7 @@ func TestLoopbackLocalAPI(t *testing.T) {
 }
 
 func TestLoopbackSOCKS5(t *testing.T) {
+	flakytest.Mark(t, "https://github.com/tailscale/tailscale/issues/8198")
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -520,7 +522,7 @@ func TestFunnel(t *testing.T) {
 		t.Errorf("unexpected status code: %v", resp.StatusCode)
 		return
 	}
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		t.Fatal(err)
 	}

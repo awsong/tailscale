@@ -1,7 +1,8 @@
 // Copyright (c) Tailscale Inc & AUTHORS
 // SPDX-License-Identifier: BSD-3-Clause
 
-//go:build linux && !(386 || loong64 || arm || armbe)
+// TODO(#8502): add support for more architectures
+//go:build linux && (arm64 || amd64)
 
 package linuxfw
 
@@ -106,12 +107,18 @@ func DebugNetfilter(logf logger.Logf) error {
 func DetectNetfilter() (int, error) {
 	conn, err := nftables.New()
 	if err != nil {
-		return 0, err
+		return 0, FWModeNotSupportedError{
+			Mode: FirewallModeNfTables,
+			Err:  err,
+		}
 	}
 
 	chains, err := conn.ListChains()
 	if err != nil {
-		return 0, fmt.Errorf("cannot list chains: %w", err)
+		return 0, FWModeNotSupportedError{
+			Mode: FirewallModeNfTables,
+			Err:  fmt.Errorf("cannot list chains: %w", err),
+		}
 	}
 
 	var validRules int

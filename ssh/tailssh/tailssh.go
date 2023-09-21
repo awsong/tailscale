@@ -64,7 +64,7 @@ type ipnLocalBackend interface {
 	GetSSH_HostKeys() ([]gossh.Signer, error)
 	ShouldRunSSH() bool
 	NetMap() *netmap.NetworkMap
-	WhoIs(ipp netip.AddrPort) (n *tailcfg.Node, u tailcfg.UserProfile, ok bool)
+	WhoIs(ipp netip.AddrPort) (n tailcfg.NodeView, u tailcfg.UserProfile, ok bool)
 	DoNoiseRequest(req *http.Request) (*http.Response, error)
 	Dialer() *tsdial.Dialer
 	TailscaleVarRoot() string
@@ -787,11 +787,11 @@ func (c *conn) expandDelegateURLLocked(actionURL string) string {
 	lu := c.localUser
 	var dstNodeID string
 	if nm != nil {
-		dstNodeID = fmt.Sprint(int64(nm.SelfNode.ID))
+		dstNodeID = fmt.Sprint(int64(nm.SelfNode.ID()))
 	}
 	return strings.NewReplacer(
 		"$SRC_NODE_IP", url.QueryEscape(ci.src.Addr().String()),
-		"$SRC_NODE_ID", fmt.Sprint(int64(ci.node.ID)),
+		"$SRC_NODE_ID", fmt.Sprint(int64(ci.node.ID())),
 		"$DST_NODE_IP", url.QueryEscape(ci.dst.Addr().String()),
 		"$DST_NODE_ID", dstNodeID,
 		"$SSH_USER", url.QueryEscape(ci.sshUser),
@@ -823,12 +823,16 @@ type sshSession struct {
 	agentListener net.Listener // non-nil if agent-forwarding requested+allowed
 
 	// initialized by launchProcess:
-	cmd    *exec.Cmd
-	stdin  io.WriteCloser
-	stdout io.ReadCloser
-	stderr io.Reader // nil for pty sessions
-	ptyReq *ssh.Pty  // non-nil for pty sessions
-	tty    *os.File  // non-nil for pty sessions, must be closed after process exits
+	cmd      *exec.Cmd
+	wrStdin  io.WriteCloser
+	rdStdout io.ReadCloser
+	rdStderr io.ReadCloser // rdStderr is nil for pty sessions
+	ptyReq   *ssh.Pty      // non-nil for pty sessions
+
+	// childPipes is a list of pipes that need to be closed when the process exits.
+	// For pty sessions, this is the tty fd.
+	// For non-pty sessions, this is the stdin, stdout, stderr fds.
+	childPipes []io.Closer
 
 	// We use this sync.Once to ensure that we only terminate the process once,
 	// either it exits itself or is terminated
@@ -1084,6 +1088,7 @@ func (ss *sshSession) run() {
 				ss.Exit(1)
 				return
 			}
+			ss.logf("startNewRecording: <nil>")
 			if rec != nil {
 				defer rec.Close()
 			}
@@ -1107,21 +1112,22 @@ func (ss *sshSession) run() {
 
 	var processDone atomic.Bool
 	go func() {
-		defer ss.stdin.Close()
-		if _, err := io.Copy(rec.writer("i", ss.stdin), ss); err != nil {
+		defer ss.wrStdin.Close()
+		if _, err := io.Copy(rec.writer("i", ss.wrStdin), ss); err != nil {
 			logf("stdin copy: %v", err)
 			ss.cancelCtx(err)
 		}
 	}()
+	outputDone := make(chan struct{})
 	var openOutputStreams atomic.Int32
-	if ss.stderr != nil {
+	if ss.rdStderr != nil {
 		openOutputStreams.Store(2)
 	} else {
 		openOutputStreams.Store(1)
 	}
 	go func() {
-		defer ss.stdout.Close()
-		_, err := io.Copy(rec.writer("o", ss), ss.stdout)
+		defer ss.rdStdout.Close()
+		_, err := io.Copy(rec.writer("o", ss), ss.rdStdout)
 		if err != nil && !errors.Is(err, io.EOF) {
 			isErrBecauseProcessExited := processDone.Load() && errors.Is(err, syscall.EIO)
 			if !isErrBecauseProcessExited {
@@ -1131,31 +1137,40 @@ func (ss *sshSession) run() {
 		}
 		if openOutputStreams.Add(-1) == 0 {
 			ss.CloseWrite()
+			close(outputDone)
 		}
 	}()
-	// stderr is nil for ptys.
-	if ss.stderr != nil {
+	// rdStderr is nil for ptys.
+	if ss.rdStderr != nil {
 		go func() {
-			_, err := io.Copy(ss.Stderr(), ss.stderr)
+			defer ss.rdStderr.Close()
+			_, err := io.Copy(ss.Stderr(), ss.rdStderr)
 			if err != nil {
 				logf("stderr copy: %v", err)
 			}
 			if openOutputStreams.Add(-1) == 0 {
 				ss.CloseWrite()
+				close(outputDone)
 			}
 		}()
 	}
 
-	if ss.tty != nil {
-		// If running a tty session, close the tty when the session is done.
-		defer ss.tty.Close()
-	}
 	err = ss.cmd.Wait()
 	processDone.Store(true)
+
 	// This will either make the SSH Termination goroutine be a no-op,
 	// or itself will be a no-op because the process was killed by the
 	// aforementioned goroutine.
 	ss.exitOnce.Do(func() {})
+
+	// Close the process-side of all pipes to signal the asynchronous
+	// io.Copy routines reading/writing from the pipes to terminate.
+	// Block for the io.Copy to finish before calling ss.Exit below.
+	closeAll(ss.childPipes...)
+	select {
+	case <-outputDone:
+	case <-ss.ctx.Done():
+	}
 
 	if err == nil {
 		ss.logf("Session complete")
@@ -1206,7 +1221,7 @@ type sshConnInfo struct {
 	dst netip.AddrPort
 
 	// node is srcIP's node.
-	node *tailcfg.Node
+	node tailcfg.NodeView
 
 	// uprof is node's UserProfile.
 	uprof tailcfg.UserProfile
@@ -1320,7 +1335,7 @@ func (c *conn) principalMatchesTailscaleIdentity(p *tailcfg.SSHPrincipal) bool {
 	if p.Any {
 		return true
 	}
-	if !p.Node.IsZero() && ci.node != nil && p.Node == ci.node.StableID {
+	if !p.Node.IsZero() && ci.node.Valid() && p.Node == ci.node.StableID() {
 		return true
 	}
 	if p.NodeIP != "" {
@@ -1644,6 +1659,7 @@ func (ss *sshSession) startNewRecording() (_ *recording, err error) {
 			err := <-errChan
 			if err == nil {
 				// Success.
+				ss.logf("recording: finished uploading recording")
 				return
 			}
 			if onFailure != nil && onFailure.NotifyURL != "" && len(attempts) > 0 {
@@ -1688,15 +1704,15 @@ func (ss *sshSession) startNewRecording() (_ *recording, err error) {
 		},
 		SSHUser:      ss.conn.info.sshUser,
 		LocalUser:    ss.conn.localUser.Username,
-		SrcNode:      strings.TrimSuffix(ss.conn.info.node.Name, "."),
-		SrcNodeID:    ss.conn.info.node.StableID,
+		SrcNode:      strings.TrimSuffix(ss.conn.info.node.Name(), "."),
+		SrcNodeID:    ss.conn.info.node.StableID(),
 		ConnectionID: ss.conn.connID,
 	}
 	if !ss.conn.info.node.IsTagged() {
 		ch.SrcNodeUser = ss.conn.info.uprof.LoginName
-		ch.SrcNodeUserID = ss.conn.info.node.User
+		ch.SrcNodeUserID = ss.conn.info.node.User()
 	} else {
-		ch.SrcNodeTags = ss.conn.info.node.Tags
+		ch.SrcNodeTags = ss.conn.info.node.Tags().AsSlice()
 	}
 	j, err := json.Marshal(ch)
 	if err != nil {
@@ -1724,7 +1740,7 @@ func (ss *sshSession) notifyControl(ctx context.Context, nodeKey key.NodePublic,
 		ConnectionID:      ss.conn.connID,
 		CapVersion:        tailcfg.CurrentCapabilityVersion,
 		NodeKey:           nodeKey,
-		SrcNode:           ss.conn.info.node.ID,
+		SrcNode:           ss.conn.info.node.ID(),
 		SSHUser:           ss.conn.info.sshUser,
 		LocalUser:         ss.conn.localUser.Username,
 		RecordingAttempts: attempts,
@@ -1893,4 +1909,12 @@ func (ue userVisibleError) SSHTerminationMessage() string { return ue.msg }
 type SSHTerminationError interface {
 	error
 	SSHTerminationMessage() string
+}
+
+func closeAll(cs ...io.Closer) {
+	for _, c := range cs {
+		if c != nil {
+			c.Close()
+		}
+	}
 }

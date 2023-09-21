@@ -22,6 +22,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -31,7 +32,6 @@ import (
 	"github.com/pkg/sftp"
 	"github.com/u-root/u-root/pkg/termios"
 	gossh "golang.org/x/crypto/ssh"
-	"golang.org/x/exp/slices"
 	"golang.org/x/sys/unix"
 	"tailscale.com/cmd/tailscaled/childproc"
 	"tailscale.com/hostinfo"
@@ -99,7 +99,7 @@ func (ss *sshSession) newIncubatorCommand() (cmd *exec.Cmd) {
 	gids := strings.Join(ss.conn.userGroupIDs, ",")
 	remoteUser := ci.uprof.LoginName
 	if ci.node.IsTagged() {
-		remoteUser = strings.Join(ci.node.Tags, ",")
+		remoteUser = strings.Join(ci.node.Tags().AsSlice(), ",")
 	}
 
 	incubatorArgs := []string{
@@ -270,7 +270,12 @@ func beIncubator(args []string) error {
 		if err != nil {
 			return err
 		}
-		return server.Serve()
+		// TODO(https://github.com/pkg/sftp/pull/554): Revert the check for io.EOF,
+		// when sftp is patched to report clean termination.
+		if err := server.Serve(); err != nil && err != io.EOF {
+			return err
+		}
+		return nil
 	}
 
 	cmd := exec.Command(ia.cmdName, ia.cmdArgs...)
@@ -476,10 +481,10 @@ func (ss *sshSession) launchProcess() error {
 	}
 	go resizeWindow(ptyDup /* arbitrary fd */, winCh)
 
-	ss.tty = tty
-	ss.stdin = pty
-	ss.stdout = os.NewFile(uintptr(ptyDup), pty.Name())
-	ss.stderr = nil // not available for pty
+	ss.wrStdin = pty
+	ss.rdStdout = os.NewFile(uintptr(ptyDup), pty.Name())
+	ss.rdStderr = nil // not available for pty
+	ss.childPipes = []io.Closer{tty}
 
 	return nil
 }
@@ -658,40 +663,29 @@ func (ss *sshSession) startWithPTY() (ptyFile, tty *os.File, err error) {
 
 // startWithStdPipes starts cmd with os.Pipe for Stdin, Stdout and Stderr.
 func (ss *sshSession) startWithStdPipes() (err error) {
-	var stdin io.WriteCloser
-	var stdout, stderr io.ReadCloser
+	var rdStdin, wrStdout, wrStderr io.ReadWriteCloser
 	defer func() {
 		if err != nil {
-			for _, c := range []io.Closer{stdin, stdout, stderr} {
-				if c != nil {
-					c.Close()
-				}
-			}
+			closeAll(rdStdin, ss.wrStdin, ss.rdStdout, wrStdout, ss.rdStderr, wrStderr)
 		}
 	}()
-	cmd := ss.cmd
-	if cmd == nil {
+	if ss.cmd == nil {
 		return errors.New("nil cmd")
 	}
-	stdin, err = cmd.StdinPipe()
-	if err != nil {
+	if rdStdin, ss.wrStdin, err = os.Pipe(); err != nil {
 		return err
 	}
-	stdout, err = cmd.StdoutPipe()
-	if err != nil {
+	if ss.rdStdout, wrStdout, err = os.Pipe(); err != nil {
 		return err
 	}
-	stderr, err = cmd.StderrPipe()
-	if err != nil {
+	if ss.rdStderr, wrStderr, err = os.Pipe(); err != nil {
 		return err
 	}
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-	ss.stdin = stdin
-	ss.stdout = stdout
-	ss.stderr = stderr
-	return nil
+	ss.cmd.Stdin = rdStdin
+	ss.cmd.Stdout = wrStdout
+	ss.cmd.Stderr = wrStderr
+	ss.childPipes = []io.Closer{rdStdin, wrStdout, wrStderr}
+	return ss.cmd.Start()
 }
 
 func envForUser(u *userMeta) []string {

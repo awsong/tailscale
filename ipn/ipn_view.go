@@ -79,13 +79,14 @@ func (v PrefsView) Hostname() string                   { return v.ж.Hostname }
 func (v PrefsView) NotepadURLs() bool                  { return v.ж.NotepadURLs }
 func (v PrefsView) ForceDaemon() bool                  { return v.ж.ForceDaemon }
 func (v PrefsView) Egg() bool                          { return v.ж.Egg }
-func (v PrefsView) AdvertiseRoutes() views.IPPrefixSlice {
-	return views.IPPrefixSliceOf(v.ж.AdvertiseRoutes)
+func (v PrefsView) AdvertiseRoutes() views.Slice[netip.Prefix] {
+	return views.SliceOf(v.ж.AdvertiseRoutes)
 }
 func (v PrefsView) NoSNAT() bool                          { return v.ж.NoSNAT }
 func (v PrefsView) NetfilterMode() preftype.NetfilterMode { return v.ж.NetfilterMode }
 func (v PrefsView) OperatorUser() string                  { return v.ж.OperatorUser }
 func (v PrefsView) ProfileName() string                   { return v.ж.ProfileName }
+func (v PrefsView) AutoUpdate() AutoUpdatePrefs           { return v.ж.AutoUpdate }
 func (v PrefsView) Persist() persist.PersistView          { return v.ж.Persist.View() }
 
 // A compilation failure here means this code must be regenerated, with the command at the top of this file.
@@ -111,6 +112,7 @@ var _PrefsViewNeedsRegeneration = Prefs(struct {
 	NetfilterMode          preftype.NetfilterMode
 	OperatorUser           string
 	ProfileName            string
+	AutoUpdate             AutoUpdatePrefs
 	Persist                *persist.Persist
 }{})
 
@@ -175,11 +177,20 @@ func (v ServeConfigView) AllowFunnel() views.Map[HostPort, bool] {
 	return views.MapOf(v.ж.AllowFunnel)
 }
 
+func (v ServeConfigView) Foreground() views.MapFn[string, *ServeConfig, ServeConfigView] {
+	return views.MapFnOf(v.ж.Foreground, func(t *ServeConfig) ServeConfigView {
+		return t.View()
+	})
+}
+func (v ServeConfigView) ETag() string { return v.ж.ETag }
+
 // A compilation failure here means this code must be regenerated, with the command at the top of this file.
 var _ServeConfigViewNeedsRegeneration = ServeConfig(struct {
 	TCP         map[uint16]*TCPPortHandler
 	Web         map[HostPort]*WebServerConfig
 	AllowFunnel map[HostPort]bool
+	Foreground  map[string]*ServeConfig
+	ETag        string
 }{})
 
 // View returns a readonly view of TCPPortHandler.
@@ -228,12 +239,14 @@ func (v *TCPPortHandlerView) UnmarshalJSON(b []byte) error {
 }
 
 func (v TCPPortHandlerView) HTTPS() bool          { return v.ж.HTTPS }
+func (v TCPPortHandlerView) HTTP() bool           { return v.ж.HTTP }
 func (v TCPPortHandlerView) TCPForward() string   { return v.ж.TCPForward }
 func (v TCPPortHandlerView) TerminateTLS() string { return v.ж.TerminateTLS }
 
 // A compilation failure here means this code must be regenerated, with the command at the top of this file.
 var _TCPPortHandlerViewNeedsRegeneration = TCPPortHandler(struct {
 	HTTPS        bool
+	HTTP         bool
 	TCPForward   string
 	TerminateTLS string
 }{})

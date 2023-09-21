@@ -28,6 +28,7 @@ import (
 
 	"github.com/peterbourgon/ff/v3/ffcli"
 	"golang.org/x/net/http/httpproxy"
+	"tailscale.com/client/tailscale"
 	"tailscale.com/client/tailscale/apitype"
 	"tailscale.com/control/controlhttp"
 	"tailscale.com/hostinfo"
@@ -128,6 +129,21 @@ var debugCmd = &ffcli.Command{
 			ShortHelp: "force a magicsock rebind",
 		},
 		{
+			Name:      "break-tcp-conns",
+			Exec:      localAPIAction("break-tcp-conns"),
+			ShortHelp: "break any open TCP connections from the daemon",
+		},
+		{
+			Name:      "break-derp-conns",
+			Exec:      localAPIAction("break-derp-conns"),
+			ShortHelp: "break any open DERP connections from the daemon",
+		},
+		{
+			Name:      "control-knobs",
+			Exec:      debugControlKnobs,
+			ShortHelp: "see current control knobs",
+		},
+		{
 			Name:      "prefs",
 			Exec:      runPrefs,
 			ShortHelp: "print prefs",
@@ -209,7 +225,9 @@ var debugCmd = &ffcli.Command{
 				fs := newFlagSet("portmap")
 				fs.DurationVar(&debugPortmapArgs.duration, "duration", 5*time.Second, "timeout for port mapping")
 				fs.StringVar(&debugPortmapArgs.ty, "type", "", `portmap debug type (one of "", "pmp", "pcp", or "upnp")`)
-				fs.StringVar(&debugPortmapArgs.gwSelf, "gw-self", "", `override gateway and self IP (format: "gatewayIP/selfIP")`)
+				fs.StringVar(&debugPortmapArgs.gatewayAddr, "gateway-addr", "", `override gateway IP (must also pass --self-addr)`)
+				fs.StringVar(&debugPortmapArgs.selfAddr, "self-addr", "", `override self IP (must also pass --gateway-addr)`)
+				fs.BoolVar(&debugPortmapArgs.logHTTP, "log-http", false, `print all HTTP requests and responses to the log`)
 				return fs
 			})(),
 		},
@@ -808,17 +826,34 @@ func runCapture(ctx context.Context, args []string) error {
 }
 
 var debugPortmapArgs struct {
-	duration time.Duration
-	gwSelf   string
-	ty       string
+	duration    time.Duration
+	gatewayAddr string
+	selfAddr    string
+	ty          string
+	logHTTP     bool
 }
 
 func debugPortmap(ctx context.Context, args []string) error {
-	rc, err := localClient.DebugPortmap(ctx,
-		debugPortmapArgs.duration,
-		debugPortmapArgs.ty,
-		debugPortmapArgs.gwSelf,
-	)
+	opts := &tailscale.DebugPortmapOpts{
+		Duration: debugPortmapArgs.duration,
+		Type:     debugPortmapArgs.ty,
+		LogHTTP:  debugPortmapArgs.logHTTP,
+	}
+	if (debugPortmapArgs.gatewayAddr != "") != (debugPortmapArgs.selfAddr != "") {
+		return fmt.Errorf("if one of --gateway-addr and --self-addr is provided, the other must be as well")
+	}
+	if debugPortmapArgs.gatewayAddr != "" {
+		var err error
+		opts.GatewayAddr, err = netip.ParseAddr(debugPortmapArgs.gatewayAddr)
+		if err != nil {
+			return fmt.Errorf("invalid --gateway-addr: %w", err)
+		}
+		opts.SelfAddr, err = netip.ParseAddr(debugPortmapArgs.selfAddr)
+		if err != nil {
+			return fmt.Errorf("invalid --self-addr: %w", err)
+		}
+	}
+	rc, err := localClient.DebugPortmap(ctx, opts)
 	if err != nil {
 		return err
 	}
@@ -883,5 +918,19 @@ func runPeerEndpointChanges(ctx context.Context, args []string) error {
 		dst.WriteByte('\n')
 	}
 	fmt.Printf("%s", dst.String())
+	return nil
+}
+
+func debugControlKnobs(ctx context.Context, args []string) error {
+	if len(args) > 0 {
+		return errors.New("unexpected arguments")
+	}
+	v, err := localClient.DebugResultJSON(ctx, "control-knobs")
+	if err != nil {
+		return err
+	}
+	e := json.NewEncoder(os.Stdout)
+	e.SetIndent("", "  ")
+	e.Encode(v)
 	return nil
 }

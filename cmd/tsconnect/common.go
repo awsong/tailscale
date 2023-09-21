@@ -1,6 +1,8 @@
 // Copyright (c) Tailscale Inc & AUTHORS
 // SPDX-License-Identifier: BSD-3-Clause
 
+//go:build !plan9
+
 package main
 
 import (
@@ -12,11 +14,11 @@ import (
 	"path"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"time"
 
 	esbuild "github.com/evanw/esbuild/pkg/api"
-	"golang.org/x/exp/slices"
 )
 
 const (
@@ -31,6 +33,9 @@ func commonSetup(dev bool) (*esbuild.BuildOptions, error) {
 	root, err := findRepoRoot()
 	if err != nil {
 		return nil, err
+	}
+	if *yarnPath == "" {
+		*yarnPath = path.Join(root, "tool", "yarn")
 	}
 	tsConnectDir := filepath.Join(root, "cmd", "tsconnect")
 	if err := os.Chdir(tsConnectDir); err != nil {
