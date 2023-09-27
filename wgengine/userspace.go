@@ -304,7 +304,7 @@ func NewUserspaceEngine(logf logger.Logf, conf Config) (_ Engine, reterr error) 
 	tunName, _ := conf.Tun.Name()
 	conf.Dialer.SetTUNName(tunName)
 	conf.Dialer.SetNetMon(e.netMon)
-	e.dns = dns.NewManager(logf, conf.DNS, e.netMon, conf.Dialer, fwdDNSLinkSelector{e, tunName})
+	e.dns = dns.NewManager(logf, conf.DNS, e.netMon, conf.Dialer, fwdDNSLinkSelector{e, tunName}, conf.ControlKnobs)
 
 	// TODO: there's probably a better place for this
 	sockstats.SetNetMon(e.netMon)
@@ -804,6 +804,8 @@ func (e *userspaceEngine) Reconfig(cfg *wgcfg.Config, routerCfg *router.Config, 
 		listenPort = 0
 	}
 
+	peerMTUEnable := e.magicConn.ShouldPMTUD()
+
 	isSubnetRouter := false
 	if e.birdClient != nil && nm != nil && nm.SelfNode.Valid() {
 		isSubnetRouter = hasOverlap(nm.SelfNode.PrimaryRoutes(), nm.SelfNode.Hostinfo().RoutableIPs())
@@ -818,7 +820,9 @@ func (e *userspaceEngine) Reconfig(cfg *wgcfg.Config, routerCfg *router.Config, 
 		RouterConfig *router.Config
 		DNSConfig    *dns.Config
 	}{routerCfg, dnsCfg})
-	if !engineChanged && !routerChanged && listenPort == e.magicConn.LocalPort() && !isSubnetRouterChanged {
+	listenPortChanged := listenPort != e.magicConn.LocalPort()
+	peerMTUChanged := peerMTUEnable != e.magicConn.PeerMTUEnabled()
+	if !engineChanged && !routerChanged && !listenPortChanged && !isSubnetRouterChanged && !peerMTUChanged {
 		return ErrNoChanges
 	}
 	newLogIDs := cfg.NetworkLogging
@@ -874,6 +878,7 @@ func (e *userspaceEngine) Reconfig(cfg *wgcfg.Config, routerCfg *router.Config, 
 	}
 	e.magicConn.UpdatePeers(peerSet)
 	e.magicConn.SetPreferredPort(listenPort)
+	e.magicConn.UpdatePMTUD()
 
 	if err := e.maybeReconfigWireguardLocked(discoChanged); err != nil {
 		return err

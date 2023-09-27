@@ -165,6 +165,9 @@ type Conn struct {
 	// port is the preferred port from opts.Port; 0 means auto.
 	port atomic.Uint32
 
+	// peerMTUEnabled is whether path MTU discovery to peers is enabled.
+	peerMTUEnabled atomic.Bool
+
 	// stats maintains per-connection counters.
 	stats atomic.Pointer[connstats.Statistics]
 
@@ -982,6 +985,8 @@ var errConnClosed = errors.New("Conn closed")
 var errDropDerpPacket = errors.New("too many DERP packets queued; dropping")
 
 var errNoUDP = errors.New("no UDP available on platform")
+
+var errUnsupportedConnType = errors.New("unsupported connection type")
 
 var (
 	// This acts as a compile-time check for our usage of ipv6.Message in
@@ -2308,15 +2313,6 @@ func (c *Conn) bindSocket(ruc *RebindingUDPConn, network string, curPortFate cur
 		}
 		trySetSocketBuffer(pconn, c.logf)
 
-		if CanPMTUD() {
-			err = setDontFragment(pconn, network)
-			if err != nil {
-				c.logf("magicsock: set dontfragment failed for %v port %d: %v", network, port, err)
-				// TODO disable PMTUD in this case. We don't expect the setsockopt to fail on
-				// supported platforms, but we might as well be paranoid.
-			}
-		}
-
 		// Success.
 		if debugBindSocket() {
 			c.logf("magicsock: bindSocket: successfully listened %v port %d", network, port)
@@ -2356,6 +2352,7 @@ func (c *Conn) rebind(curPortFate currentPortFate) error {
 		return fmt.Errorf("magicsock: Rebind IPv4 failed: %w", err)
 	}
 	c.portMapper.SetLocalPort(c.LocalPort())
+	c.UpdatePMTUD()
 	return nil
 }
 
