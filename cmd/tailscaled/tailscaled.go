@@ -480,6 +480,8 @@ func startIPNServer(ctx context.Context, logf logger.Logf, logID logid.PublicID,
 		lb, err := getLocalBackend(ctx, logf, logID, sys)
 		if err == nil {
 			logf("got LocalBackend in %v", time.Since(t0).Round(time.Millisecond))
+			gui := NewGUIBackend(lb)
+			gui.run()
 			srv.SetLocalBackend(lb)
 			close(wgEngineCreated)
 			return

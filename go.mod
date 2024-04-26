@@ -40,6 +40,7 @@ require (
 	github.com/google/nftables v0.2.1-0.20240414091927-5e242ec57806
 	github.com/google/uuid v1.5.0
 	github.com/goreleaser/nfpm/v2 v2.33.1
+	github.com/gorilla/websocket v1.5.0
 	github.com/hdevalence/ed25519consensus v0.2.0
 	github.com/iancoleman/strcase v0.3.0
 	github.com/illarion/gonotify v1.0.1
@@ -85,6 +86,7 @@ require (
 	github.com/u-root/u-root v0.12.0
 	github.com/vishvananda/netlink v1.2.1-beta.2
 	github.com/vishvananda/netns v0.0.4
+	github.com/wailsapp/wails/v3 v3.0.0-alpha.4
 	go.uber.org/zap v1.26.0
 	go4.org/mem v0.0.0-20220726221520-4f986261bf13
 	go4.org/netipx v0.0.0-20231129151722-fdeea329fbba
@@ -116,13 +118,23 @@ require (
 
 require (
 	github.com/Microsoft/go-winio v0.6.1 // indirect
+	github.com/bep/debounce v1.2.1 // indirect
 	github.com/bits-and-blooms/bitset v1.13.0 // indirect
 	github.com/cyphar/filepath-securejoin v0.2.4 // indirect
 	github.com/dave/astrid v0.0.0-20170323122508-8c2895878b14 // indirect
 	github.com/dave/brenda v1.1.0 // indirect
+	github.com/ebitengine/purego v0.4.0-alpha.4 // indirect
 	github.com/gobuffalo/flect v1.0.2 // indirect
 	github.com/google/gnostic-models v0.6.9-0.20230804172637-c7be7c783f49 // indirect
 	github.com/gorilla/securecookie v1.1.2 // indirect
+	github.com/jchv/go-winloader v0.0.0-20210711035445-715c2860da7e // indirect
+	github.com/leaanthony/go-ansi-parser v1.6.1 // indirect
+	github.com/leaanthony/u v1.1.0 // indirect
+	github.com/lmittmann/tint v1.0.3 // indirect
+	github.com/pkg/browser v0.0.0-20210911075715-681adbf594b8 // indirect
+	github.com/samber/lo v1.38.1 // indirect
+	github.com/wailsapp/go-webview2 v1.0.9 // indirect
+	github.com/wailsapp/mimetype v1.4.1 // indirect
 )
 
 require (

@@ -42,3 +42,6 @@ client/web/build/assets
 
 /gocross
 /dist
+
+.DS_Store
+cmd/tailscaled/frontend/dist
