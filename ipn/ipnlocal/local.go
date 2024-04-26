@@ -123,6 +123,10 @@ func getControlDebugFlags() []string {
 type SSHServer interface {
 	HandleSSHConn(net.Conn) error
 
+	// NumActiveConns returns the number of connections passed to HandleSSHConn
+	// that are still active.
+	NumActiveConns() int
+
 	// OnPolicyChange is called when the SSH access policy changes,
 	// so that existing sessions can be re-evaluated for validity
 	// and closed if they'd no longer be accepted.
@@ -2436,9 +2440,12 @@ func (b *LocalBackend) popBrowserAuthNow() {
 	b.authURL = "" // but NOT clearing authURLSticky
 	b.mu.Unlock()
 
-	b.logf("popBrowserAuthNow: url=%v", url != "")
+	b.logf("popBrowserAuthNow: url=%v, key-expired=%v, seamless-key-renewal=%v", url != "", b.keyExpired, b.seamlessRenewalEnabled())
 
-	if !b.seamlessRenewalEnabled() {
+	// Deconfigure the local network data plane if:
+	// - seamless key renewal is not enabled;
+	// - key is expired (in which case tailnet connectivity is down anyway).
+	if !b.seamlessRenewalEnabled() || b.keyExpired {
 		b.blockEngineUpdates(true)
 		b.stopEngineAndWait()
 	}
@@ -2498,6 +2505,9 @@ func (b *LocalBackend) onClientVersion(v *tailcfg.ClientVersion) {
 }
 
 func (b *LocalBackend) onTailnetDefaultAutoUpdate(au bool) {
+	unlock := b.lockAndGetUnlock()
+	defer unlock()
+
 	prefs := b.pm.CurrentPrefs()
 	if !prefs.Valid() {
 		b.logf("[unexpected]: received tailnet default auto-update callback but current prefs are nil")
@@ -2511,12 +2521,12 @@ func (b *LocalBackend) onTailnetDefaultAutoUpdate(au bool) {
 	b.logf("using tailnet default auto-update setting: %v", au)
 	prefsClone := prefs.AsStruct()
 	prefsClone.AutoUpdate.Apply = opt.NewBool(au)
-	_, err := b.EditPrefs(&ipn.MaskedPrefs{
+	_, err := b.editPrefsLockedOnEntry(&ipn.MaskedPrefs{
 		Prefs: *prefsClone,
 		AutoUpdateSet: ipn.AutoUpdatePrefsMask{
 			ApplySet: true,
 		},
-	})
+	}, unlock)
 	if err != nil {
 		b.logf("failed to apply tailnet-wide default for auto-updates (%v): %v", au, err)
 		return
@@ -2971,6 +2981,9 @@ func (b *LocalBackend) checkPrefsLocked(p *ipn.Prefs) error {
 	if err := b.checkFunnelEnabledLocked(p); err != nil {
 		errs = append(errs, err)
 	}
+	if err := b.checkAutoUpdatePrefsLocked(p); err != nil {
+		errs = append(errs, err)
+	}
 	return multierr.New(errs...)
 }
 
@@ -3057,6 +3070,13 @@ func (b *LocalBackend) checkExitNodePrefsLocked(p *ipn.Prefs) error {
 func (b *LocalBackend) checkFunnelEnabledLocked(p *ipn.Prefs) error {
 	if p.ShieldsUp && b.serveConfig.IsFunnelOn() {
 		return errors.New("Cannot enable shields-up when Funnel is enabled.")
+	}
+	return nil
+}
+
+func (b *LocalBackend) checkAutoUpdatePrefsLocked(p *ipn.Prefs) error {
+	if p.AutoUpdate.Apply.EqualBool(true) && !clientupdate.CanAutoUpdate() {
+		return errors.New("Auto-updates are not supported on this platform.")
 	}
 	return nil
 }
@@ -4824,6 +4844,11 @@ func (rbw *responseBodyWrapper) Close() error {
 }
 
 func (dt *driveTransport) RoundTrip(req *http.Request) (resp *http.Response, err error) {
+	// Some WebDAV clients include origin and refer headers, which peerapi does
+	// not like. Remove them.
+	req.Header.Del("origin")
+	req.Header.Del("referer")
+
 	bw := &requestBodyWrapper{}
 	if req.Body != nil {
 		bw.ReadCloser = req.Body
