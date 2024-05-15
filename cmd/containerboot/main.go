@@ -52,8 +52,10 @@
 //     ${TS_CERT_DOMAIN}, it will be replaced with the value of the available FQDN.
 //     It cannot be used in conjunction with TS_DEST_IP. The file is watched for changes,
 //     and will be re-applied when it changes.
-//   - EXPERIMENTAL_TS_CONFIGFILE_PATH: if specified, a path to tailscaled
-//     config. If this is set, TS_HOSTNAME, TS_EXTRA_ARGS, TS_AUTHKEY,
+//   - TS_EXPERIMENTAL_VERSIONED_CONFIG_DIR: if specified, a path to a
+//     directory that containers tailscaled config in file. The config file needs to be
+//     named cap-<current-tailscaled-cap>.hujson. If this is set, TS_HOSTNAME,
+//     TS_EXTRA_ARGS, TS_AUTHKEY,
 //     TS_ROUTES, TS_ACCEPT_DNS env vars must not be set. If this is set,
 //     containerboot only runs `tailscaled --config <path-to-this-configfile>`
 //     and not `tailscale up` or `tailscale set`.
@@ -92,6 +94,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -107,6 +110,7 @@ import (
 	"tailscale.com/client/tailscale"
 	"tailscale.com/ipn"
 	"tailscale.com/ipn/conffile"
+	kubeutils "tailscale.com/k8s-operator"
 	"tailscale.com/tailcfg"
 	"tailscale.com/types/logger"
 	"tailscale.com/types/ptr"
@@ -145,7 +149,7 @@ func main() {
 		Socket:                                defaultEnv("TS_SOCKET", "/tmp/tailscaled.sock"),
 		AuthOnce:                              defaultBool("TS_AUTH_ONCE", false),
 		Root:                                  defaultEnv("TS_TEST_ONLY_ROOT", "/"),
-		TailscaledConfigFilePath:              defaultEnv("EXPERIMENTAL_TS_CONFIGFILE_PATH", ""),
+		TailscaledConfigFilePath:              tailscaledConfigFilePath(),
 		AllowProxyingClusterTrafficViaIngress: defaultBool("EXPERIMENTAL_ALLOW_PROXYING_CLUSTER_TRAFFIC_VIA_INGRESS", false),
 		PodIP:                                 defaultEnv("POD_IP", ""),
 	}
@@ -171,44 +175,16 @@ func main() {
 		}
 	}
 
-	if cfg.InKubernetes {
-		initKube(cfg.Root)
-	}
-
 	// Context is used for all setup stuff until we're in steady
 	// state, so that if something is hanging we eventually time out
 	// and crashloop the container.
 	bootCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	if cfg.InKubernetes && cfg.KubeSecret != "" {
-		canPatch, err := kc.CheckSecretPermissions(bootCtx, cfg.KubeSecret)
-		if err != nil {
-			log.Fatalf("Some Kubernetes permissions are missing, please check your RBAC configuration: %v", err)
-		}
-		cfg.KubernetesCanPatch = canPatch
-
-		if cfg.AuthKey == "" && !isOneStepConfig(cfg) {
-			key, err := findKeyInKubeSecret(bootCtx, cfg.KubeSecret)
-			if err != nil {
-				log.Fatalf("Getting authkey from kube secret: %v", err)
-			}
-			if key != "" {
-				// This behavior of pulling authkeys from kube secrets was added
-				// at the same time as the patch permission, so we can enforce
-				// that we must be able to patch out the authkey after
-				// authenticating if you want to use this feature. This avoids
-				// us having to deal with the case where we might leave behind
-				// an unnecessary reusable authkey in a secret, like a rake in
-				// the grass.
-				if !cfg.KubernetesCanPatch {
-					log.Fatalf("authkey found in TS_KUBE_SECRET, but the pod doesn't have patch permissions on the secret to manage the authkey.")
-				}
-				log.Print("Using authkey found in kube secret")
-				cfg.AuthKey = key
-			} else {
-				log.Print("No authkey found in kube secret and TS_AUTHKEY not provided, login will be interactive if needed.")
-			}
+	if cfg.InKubernetes {
+		initKubeClient(cfg.Root)
+		if err := cfg.setupKube(bootCtx); err != nil {
+			log.Fatalf("error setting up for running on Kubernetes: %v", err)
 		}
 	}
 
@@ -559,25 +535,26 @@ runLoop:
 					log.Println("Startup complete, waiting for shutdown signal")
 					startupTasksDone = true
 
-					// Reap all processes, since we are PID1 and need to collect zombies. We can
-					// only start doing this once we've stopped shelling out to things
-					// `tailscale up`, otherwise this goroutine can reap the CLI subprocesses
-					// and wedge bringup.
+					// Wait on tailscaled process. It won't
+					// be cleaned up by default when the
+					// container exits as it is not PID1.
+					// TODO (irbekrm): perhaps we can
+					// replace the reaper by a running
+					// cmd.Wait in a goroutine immediately
+					// after starting tailscaled?
 					reaper := func() {
 						defer wg.Done()
 						for {
 							var status unix.WaitStatus
-							pid, err := unix.Wait4(-1, &status, 0, nil)
+							_, err := unix.Wait4(daemonProcess.Pid, &status, 0, nil)
 							if errors.Is(err, unix.EINTR) {
 								continue
 							}
 							if err != nil {
-								log.Fatalf("Waiting for exited processes: %v", err)
+								log.Fatalf("Waiting for tailscaled to exit: %v", err)
 							}
-							if pid == daemonProcess.Pid {
-								log.Printf("Tailscaled exited")
-								os.Exit(0)
-							}
+							log.Print("tailscaled exited")
+							os.Exit(0)
 						}
 					}
 					wg.Add(1)
@@ -1124,6 +1101,13 @@ type settings struct {
 
 func (s *settings) validate() error {
 	if s.TailscaledConfigFilePath != "" {
+		dir, file := path.Split(s.TailscaledConfigFilePath)
+		if _, err := os.Stat(dir); err != nil {
+			return fmt.Errorf("error validating whether directory with tailscaled config file %s exists: %w", dir, err)
+		}
+		if _, err := os.Stat(s.TailscaledConfigFilePath); err != nil {
+			return fmt.Errorf("error validating whether tailscaled config directory %q contains tailscaled config for current capability version %q: %w. If this is a Tailscale Kubernetes operator proxy, please ensure that the version of the operator is not older than the version of the proxy", dir, file, err)
+		}
 		if _, err := conffile.Load(s.TailscaledConfigFilePath); err != nil {
 			return fmt.Errorf("error validating tailscaled configfile contents: %w", err)
 		}
@@ -1147,7 +1131,7 @@ func (s *settings) validate() error {
 		return errors.New("Both TS_TAILNET_TARGET_IP and TS_TAILNET_FQDN cannot be set")
 	}
 	if s.TailscaledConfigFilePath != "" && (s.AcceptDNS != nil || s.AuthKey != "" || s.Routes != nil || s.ExtraArgs != "" || s.Hostname != "") {
-		return errors.New("EXPERIMENTAL_TS_CONFIGFILE_PATH cannot be set in combination with TS_HOSTNAME, TS_EXTRA_ARGS, TS_AUTHKEY, TS_ROUTES, TS_ACCEPT_DNS.")
+		return errors.New("TS_EXPERIMENTAL_VERSIONED_CONFIG_DIR cannot be set in combination with TS_HOSTNAME, TS_EXTRA_ARGS, TS_AUTHKEY, TS_ROUTES, TS_ACCEPT_DNS.")
 	}
 	if s.AllowProxyingClusterTrafficViaIngress && s.UserspaceMode {
 		return errors.New("EXPERIMENTAL_ALLOW_PROXYING_CLUSTER_TRAFFIC_VIA_INGRESS is not supported in userspace mode")
@@ -1278,4 +1262,43 @@ func isTwoStepConfigAlwaysAuth(cfg *settings) bool {
 // configured in a single step by running 'tailscaled <config opts>'
 func isOneStepConfig(cfg *settings) bool {
 	return cfg.TailscaledConfigFilePath != ""
+}
+
+// tailscaledConfigFilePath returns the path to the tailscaled config file that
+// should be used for the current capability version. It is determined by the
+// TS_EXPERIMENTAL_VERSIONED_CONFIG_DIR environment variable and looks for a
+// file named cap-<capability_version>.hujson in the directory. It searches for
+// the highest capability version that is less than or equal to the current
+// capability version.
+func tailscaledConfigFilePath() string {
+	dir := os.Getenv("TS_EXPERIMENTAL_VERSIONED_CONFIG_DIR")
+	if dir == "" {
+		return ""
+	}
+	fe, err := os.ReadDir(dir)
+	if err != nil {
+		log.Fatalf("error reading tailscaled config directory %q: %v", dir, err)
+	}
+	maxCompatVer := tailcfg.CapabilityVersion(-1)
+	for _, e := range fe {
+		// We don't check if type if file as in most cases this will
+		// come from a mounted kube Secret, where the directory contents
+		// will be various symlinks.
+		if e.Type().IsDir() {
+			continue
+		}
+		cv, err := kubeutils.CapVerFromFileName(e.Name())
+		if err != nil {
+			log.Printf("skipping file %q in tailscaled config directory %q: %v", e.Name(), dir, err)
+			continue
+		}
+		if cv > maxCompatVer && cv <= tailcfg.CurrentCapabilityVersion {
+			maxCompatVer = cv
+		}
+	}
+	if maxCompatVer == -1 {
+		log.Fatalf("no tailscaled config file found in %q for current capability version %q", dir, tailcfg.CurrentCapabilityVersion)
+	}
+	log.Printf("Using tailscaled config file %q for capability version %q", maxCompatVer, tailcfg.CurrentCapabilityVersion)
+	return path.Join(dir, kubeutils.TailscaledConfigFileNameForCap(maxCompatVer))
 }

@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/rand"
 	"net"
 	"net/http"
 	"net/netip"
@@ -186,7 +185,7 @@ type resolverAndDelay struct {
 // forwarder forwards DNS packets to a number of upstream nameservers.
 type forwarder struct {
 	logf    logger.Logf
-	netMon  *netmon.Monitor
+	netMon  *netmon.Monitor     // always non-nil
 	linkSel ForwardLinkSelector // TODO(bradfitz): remove this when tsdial.Dialer absorbs it
 	dialer  *tsdial.Dialer
 
@@ -214,11 +213,10 @@ type forwarder struct {
 	cloudHostFallback []resolverAndDelay
 }
 
-func init() {
-	rand.Seed(time.Now().UnixNano())
-}
-
 func newForwarder(logf logger.Logf, netMon *netmon.Monitor, linkSel ForwardLinkSelector, dialer *tsdial.Dialer, knobs *controlknobs.Knobs) *forwarder {
+	if netMon == nil {
+		panic("nil netMon")
+	}
 	f := &forwarder{
 		logf:         logger.WithPrefix(logf, "forward: "),
 		netMon:       netMon,
@@ -393,24 +391,11 @@ func (f *forwarder) getKnownDoHClientForProvider(urlBase string) (c *http.Client
 	if err != nil {
 		return nil, false
 	}
-	// NOTE: use f.dialer.SystemDial so we close connections on a link
-	// change; on mobile devices when switching between WiFi and cellular,
-	// we need to ensure we don't retain a connection on the old interface
-	// or we can block DNS resolution.
-	//
-	// NOTE: if we ever support arbitrary user-defined DoH providers, this
-	// isn't sufficient; we'd need a dialer that dial a DoH server on the
-	// internet, without going through Tailscale (as SystemDial does), but
-	// also can dial a node on the tailnet (e.g. a PiHole).
-	//
-	// As of the time of writing (2024-02-11), this isn't a problem because
-	// we only support a restricted set of public DoH providers that aren't
-	// on a user's tailnet.
-	dialer := dnscache.Dialer(f.dialer.SystemDial, &dnscache.Resolver{
+
+	dialer := dnscache.Dialer(f.getDialerType(), &dnscache.Resolver{
 		SingleHost:             dohURL.Hostname(),
 		SingleHostStaticResult: allIPs,
 		Logf:                   f.logf,
-		NetMon:                 f.netMon,
 	})
 	c = &http.Client{
 		Transport: &http.Transport{
@@ -584,7 +569,7 @@ func (f *forwarder) send(ctx context.Context, fq *forwardQuery, rr resolverAndDe
 	}
 
 	// Kick off the race between the UDP and TCP queries.
-	rh := race.New[[]byte](timeout, firstUDP, thenTCP)
+	rh := race.New(timeout, firstUDP, thenTCP)
 	resp, err := rh.Start(ctx)
 	if err == nil {
 		return resp, nil
@@ -702,6 +687,23 @@ func (f *forwarder) sendUDP(ctx context.Context, fq *forwardQuery, rr resolverAn
 	return out, nil
 }
 
+func (f *forwarder) getDialerType() dnscache.DialContextFunc {
+	if f.controlKnobs != nil && f.controlKnobs.UserDialUseRoutes.Load() {
+		// It is safe to use UserDial as it dials external servers without going through Tailscale
+		// and closes connections on interface change in the same way as SystemDial does,
+		// thus preventing DNS resolution issues when switching between WiFi and cellular,
+		// but can also dial an internal DNS server on the Tailnet or via a subnet router.
+		//
+		// TODO(nickkhyl): Update tsdial.Dialer to reuse the bart.Table we create in net/tstun.Wrapper
+		// to avoid having two bart tables in memory, especially on iOS. Once that's done,
+		// we can get rid of the nodeAttr/control knob and always use UserDial for DNS.
+		//
+		// See https://github.com/tailscale/tailscale/issues/12027.
+		return f.dialer.UserDial
+	}
+	return f.dialer.SystemDial
+}
+
 func (f *forwarder) sendTCP(ctx context.Context, fq *forwardQuery, rr resolverAndDelay) (ret []byte, err error) {
 	ipp, ok := rr.name.IPPort()
 	if !ok {
@@ -720,7 +722,7 @@ func (f *forwarder) sendTCP(ctx context.Context, fq *forwardQuery, rr resolverAn
 	ctx, cancel := context.WithTimeout(ctx, tcpQueryTimeout)
 	defer cancel()
 
-	conn, err := f.dialer.SystemDial(ctx, tcpFam, ipp.String())
+	conn, err := f.getDialerType()(ctx, tcpFam, ipp.String())
 	if err != nil {
 		return nil, err
 	}
@@ -862,7 +864,7 @@ func (f *forwarder) forwardWithDestChan(ctx context.Context, query packet, respo
 		}
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return fmt.Errorf("waiting to send NXDOMAIN: %w", ctx.Err())
 		case responseChan <- res:
 			return nil
 		}
@@ -888,7 +890,7 @@ func (f *forwarder) forwardWithDestChan(ctx context.Context, query packet, respo
 			}
 			select {
 			case <-ctx.Done():
-				return ctx.Err()
+				return fmt.Errorf("waiting to send SERVFAIL: %w", ctx.Err())
 			case responseChan <- res:
 				return nil
 			}
@@ -918,6 +920,7 @@ func (f *forwarder) forwardWithDestChan(ctx context.Context, query packet, respo
 			}
 			resb, err := f.send(ctx, fq, *rr)
 			if err != nil {
+				err = fmt.Errorf("resolving using %q: %w", rr.name.Addr, err)
 				select {
 				case errc <- err:
 				case <-ctx.Done():
@@ -939,7 +942,7 @@ func (f *forwarder) forwardWithDestChan(ctx context.Context, query packet, respo
 			select {
 			case <-ctx.Done():
 				metricDNSFwdErrorContext.Add(1)
-				return ctx.Err()
+				return fmt.Errorf("waiting to send response: %w", ctx.Err())
 			case responseChan <- packet{v, query.family, query.addr}:
 				metricDNSFwdSuccess.Add(1)
 				return nil
@@ -972,7 +975,16 @@ func (f *forwarder) forwardWithDestChan(ctx context.Context, query packet, respo
 				metricDNSFwdErrorContextGotError.Add(1)
 				return firstErr
 			}
-			return ctx.Err()
+
+			// If we haven't got an error or a successful response,
+			// include all resolvers in the error message so we can
+			// at least see what what servers we're trying to
+			// query.
+			var resolverAddrs []string
+			for _, rr := range resolvers {
+				resolverAddrs = append(resolverAddrs, rr.name.Addr)
+			}
+			return fmt.Errorf("waiting for response or error from %v: %w", resolverAddrs, ctx.Err())
 		}
 	}
 }
