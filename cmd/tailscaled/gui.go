@@ -21,7 +21,7 @@ import (
 )
 
 //go:embed frontend/dist
-var assetss embed.FS
+var assets embed.FS
 
 type Command struct {
 	Cmd  string `json:"cmd"`
