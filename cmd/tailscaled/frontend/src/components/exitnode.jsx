@@ -6,6 +6,7 @@ import {
   ListItemPrefix,
   Typography,
 } from "@material-tailwind/react";
+import * as GreetService from "/bindings/main/GreetService.js";
 
 function Icon() {
   return (
@@ -23,7 +24,7 @@ function Icon() {
     </svg>
   );
 }
-function ExitNode({ netMap, prefs, ws }) {
+function ExitNode({ netMap, prefs }) {
   let exits = netMap.Peers.filter((peer) => {
     if (peer.AllowedIPs.includes("0.0.0.0/0")) {
       return peer;
@@ -38,7 +39,7 @@ function ExitNode({ netMap, prefs, ws }) {
         className="w-4 h-4 border-gray-900/10 bg-gray-900/5 transition-all hover:before:opacity-0"
         checked={prefs.ExitNodeID === ""}
         onChange={() => {
-          ws.send(JSON.stringify({ cmd: "exitNode", data: "" }));
+          GreetService.Send(JSON.stringify({ cmd: "exitNode", data: "" }));
         }}
         label={
           <Typography color="blue-gray" className="text-sm">
@@ -55,7 +56,9 @@ function ExitNode({ netMap, prefs, ws }) {
           checked={exit.StableID === prefs.ExitNodeID}
           disabled={!exit.Online}
           onChange={() => {
-            ws.send(JSON.stringify({ cmd: "exitNode", data: exit.StableID }));
+            GreetService.Send(
+              JSON.stringify({ cmd: "exitNode", data: exit.StableID })
+            );
           }}
           label={
             <Typography color="blue-gray" className="text-sm">

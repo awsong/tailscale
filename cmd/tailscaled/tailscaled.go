@@ -119,6 +119,7 @@ var args struct {
 
 	cleanUp        bool
 	confFile       string
+	daemon         bool
 	debug          string
 	port           uint16
 	statepath      string
@@ -170,6 +171,7 @@ func main() {
 	flag.BoolVar(&printVersion, "version", false, "print version information and exit")
 	flag.BoolVar(&args.disableLogs, "no-logs-no-support", false, "disable log uploads; this also disables any technical support")
 	flag.StringVar(&args.confFile, "config", "", "path to config file")
+	flag.BoolVar(&args.daemon, "daemon", true, "run program as daemon")
 
 	if len(os.Args) > 0 && filepath.Base(os.Args[0]) == "tailscale" && beCLI != nil {
 		beCLI()
@@ -383,6 +385,11 @@ func run() (err error) {
 		return nil
 	}
 
+	if !args.daemon {
+		RunWailsGUI()
+		return nil
+	}
+
 	if envknob.Bool("TS_DEBUG_MEMORY") {
 		logf = logger.RusagePrefixLog(logf)
 	}
@@ -481,8 +488,10 @@ func startIPNServer(ctx context.Context, logf logger.Logf, logID logid.PublicID,
 		lb, err := getLocalBackend(ctx, logf, logID, sys)
 		if err == nil {
 			logf("got LocalBackend in %v", time.Since(t0).Round(time.Millisecond))
+			fmt.Println("----------------------------------------------- start gui backend")
 			gui := NewGUIBackend(lb)
-			gui.run()
+			go gui.run()
+			fmt.Println("----------------------------------------------- gui.run returns")
 			if lb.Prefs().Valid() {
 				if err := lb.Start(ipn.Options{}); err != nil {
 					logf("LocalBackend.Start: %v", err)

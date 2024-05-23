@@ -46,3 +46,8 @@ client/web/build/assets
 
 .DS_Store
 cmd/tailscaled/frontend/dist
+
+wails.syso
+node_modules
+.task/
+bin/

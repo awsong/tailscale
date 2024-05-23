@@ -41,10 +41,12 @@ func NewGUIBackend(lb *ipnlocal.LocalBackend) *guiBackend {
 		lb:         lb,
 		socketPath: args.socketpath + "2",
 		mu:         &sync.Mutex{},
+		conns:      make(map[*websocket.Conn]bool),
 	}
 }
 
-func RunGUIProxy() {
+// This function runs a event loop and doesn't return, except w/ error.
+func RunWailsGUI() {
 	dummyHost := "localhost:80"
 
 	// Create a custom dialer using Unix socket or named pipe on Windows
@@ -111,9 +113,10 @@ func RunGUIProxy() {
 				log.Println("read:", err)
 				return
 			}
+			log.Println("Wails receives message from server: ", string(message))
 			app.Events.Emit(&application.WailsEvent{
 				Name: "onMessage",
-				Data: message,
+				Data: string(message),
 			})
 		}
 	}()
@@ -156,12 +159,13 @@ func (g *guiBackend) commandHandler(w http.ResponseWriter, r *http.Request) {
 			log.Println("Error reading message:", err)
 			break
 		}
-		log.Printf("Received message: %s\n", message)
+		log.Printf("Go Received message: %s\n", message)
 		var command Command
 		json.Unmarshal(message, &command)
 		switch command.Cmd {
 		case "init":
 			{
+				log.Println("Process Init command")
 				p := g.lb.Prefs()
 				s := g.lb.State()
 				nm := g.lb.NetMap()
@@ -245,6 +249,8 @@ func (g *guiBackend) run() {
 	if err != nil {
 		log.Fatalf("safesocket.Listen: %v", err)
 	}
+
+	log.Println("Listening on:", g.socketPath)
 
 	http.HandleFunc("/wails", g.commandHandler)
 	hs := &http.Server{}

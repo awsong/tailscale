@@ -35,6 +35,7 @@ import {
   IconApple,
   IconAndroid,
 } from "./icons";
+import * as GreetService from "/bindings/main/GreetService.js";
 function test(netMap) {
   if (!netMap) {
     return [];
@@ -100,7 +101,7 @@ function OSIcon({ peer }) {
       );
   }
 }
-function SidebarWithContentSeparator({ prefs, netMap, state, ws }) {
+function SidebarWithContentSeparator({ prefs, netMap, state }) {
   const [open, setOpen] = React.useState(-1);
 
   const handleOpen = (value) => {
@@ -116,7 +117,7 @@ function SidebarWithContentSeparator({ prefs, netMap, state, ws }) {
       <Card className="h-full w-full max-w-[20rem] p-4 shadow-xl shadow-blue-gray-900/5">
         <div className="b-2 p-4 flex justify-between items-center">
           {prefs.Config && <AvatarWithText prefs={prefs} />}
-          <Toggle state={state} ws={ws} />
+          <Toggle state={state} />
         </div>
         <hr className="my-2 border-blue-gray-50" />
         <List>
@@ -192,11 +193,7 @@ function SidebarWithContentSeparator({ prefs, netMap, state, ws }) {
               </ListItem>
             </PopoverHandler>
             <PopoverContent className="m-5">
-              {netMap ? (
-                <ExitNode netMap={netMap} prefs={prefs} ws={ws} />
-              ) : (
-                <></>
-              )}
+              {netMap ? <ExitNode netMap={netMap} prefs={prefs} /> : <></>}
             </PopoverContent>
           </Popover>
           <ListItem>
@@ -205,7 +202,9 @@ function SidebarWithContentSeparator({ prefs, netMap, state, ws }) {
             </ListItemPrefix>
             Settings
           </ListItem>
-          <ListItem onClick={() => ws.send(JSON.stringify({ cmd: "logout" }))}>
+          <ListItem
+            onClick={() => GreetService.Send(JSON.stringify({ cmd: "logout" }))}
+          >
             <ListItemPrefix>
               <PowerIcon className="h-5 w-5" />
             </ListItemPrefix>

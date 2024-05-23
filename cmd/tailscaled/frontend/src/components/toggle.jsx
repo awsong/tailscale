@@ -1,6 +1,7 @@
 import { Switch, Typography } from "@material-tailwind/react";
+import * as GreetService from "/bindings/main/GreetService.js";
 
-function Toggle({ state, ws }) {
+function Toggle({ state }) {
   const handleToggle = () => {
     console.log("Toggle clicked, current state: ", state);
     switch (state) {
@@ -8,10 +9,10 @@ function Toggle({ state, ws }) {
       case 2:
       case 3:
       case 4:
-        ws.send(JSON.stringify({ cmd: "up" }));
+        GreetService.Send(JSON.stringify({ cmd: "up" }));
         break;
       case 6:
-        ws.send(JSON.stringify({ cmd: "down" }));
+        GreetService.Send(JSON.stringify({ cmd: "down" }));
         break;
       default:
         console.log("Invalid state");
