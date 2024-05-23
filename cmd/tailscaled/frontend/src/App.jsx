@@ -12,7 +12,6 @@ function App() {
 
   useEffect(() => {
     wails.Events.On("onMessage", (message) => {
-      console.log("Unix Socket =================== :", message);
       const notify = JSON.parse(
         message.data.replace(/:\s*(\d{16,}),/g, ':"$1",')
       );

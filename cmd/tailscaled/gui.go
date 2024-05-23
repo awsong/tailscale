@@ -83,13 +83,14 @@ func RunWailsGUI() {
 	systemTray := app.NewSystemTray()
 
 	window := app.NewWebviewWindowWithOptions(application.WebviewWindowOptions{
-		Width:         700,
-		Height:        650,
-		Name:          "Systray Window",
-		Frameless:     true,
-		AlwaysOnTop:   true,
-		Hidden:        true,
-		DisableResize: true,
+		Width:            700,
+		Height:           650,
+		BackgroundColour: application.NewRGB(255, 255, 255),
+		Name:             "Systray Window",
+		Frameless:        true,
+		AlwaysOnTop:      true,
+		Hidden:           true,
+		DisableResize:    true,
 		ShouldClose: func(window *application.WebviewWindow) bool {
 			window.Hide()
 			return false
@@ -113,7 +114,6 @@ func RunWailsGUI() {
 				log.Println("read:", err)
 				return
 			}
-			log.Println("Wails receives message from server: ", string(message))
 			app.Events.Emit(&application.WailsEvent{
 				Name: "onMessage",
 				Data: string(message),
@@ -159,13 +159,11 @@ func (g *guiBackend) commandHandler(w http.ResponseWriter, r *http.Request) {
 			log.Println("Error reading message:", err)
 			break
 		}
-		log.Printf("Go Received message: %s\n", message)
 		var command Command
 		json.Unmarshal(message, &command)
 		switch command.Cmd {
 		case "init":
 			{
-				log.Println("Process Init command")
 				p := g.lb.Prefs()
 				s := g.lb.State()
 				nm := g.lb.NetMap()
